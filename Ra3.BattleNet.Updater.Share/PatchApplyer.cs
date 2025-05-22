@@ -2,7 +2,7 @@
 using System.Runtime.InteropServices;
 using static Updater.PublicMethod;
 
-namespace Updater
+namespace Ra3.BattleNet.Updater.Share
 {
     public class PatchApplyer
     {

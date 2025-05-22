@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Ra3.BattleNet.Updater.Client": {
+      "commandName": "Project",
+      "workingDirectory": "$(SolutionDir)"
+    }
+  }
+}
