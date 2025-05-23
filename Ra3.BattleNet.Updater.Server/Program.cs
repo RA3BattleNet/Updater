@@ -1,4 +1,5 @@
 ﻿using Ra3.BattleNet.Updater.Share;
+using System.Diagnostics;
 using System.Xml;
 
 namespace Ra3.BattleNet.Updater.Server
@@ -22,7 +23,7 @@ namespace Ra3.BattleNet.Updater.Server
             #region stdin读取manifest.xml
             XmlDocument inputStdinXml = new XmlDocument();
 #if DEBUG
-            inputStdinXml.Load(@"./temp.2.xml");
+            inputStdinXml.Load(@"./temp.1.xml");
 #else
             string xmlInput = Console.In.ReadToEnd(); // Windows下Ctrl+Z Enter
             try
@@ -62,8 +63,23 @@ namespace Ra3.BattleNet.Updater.Server
                 Logger.Debug($"KindOf: {_.KindOf}\n");
                 Logger.Debug($"\n");
             });
-            Logger.Info($"客户端XML版本：{old_manifest.Version}");
+            Logger.Info($"客户端：v{old_manifest.Version}\tGTime {old_manifest.Tags.GenTime.DateTime.ToLocalTime()}\n");
+            Logger.Info($"版本Commit：{old_manifest.Tags.Commit}");
 
+            ManifestModel new_manifest = new ManifestModel(new Version(1,0,1),"此为手动创建的新版本");
+            foreach (ManifestFile item in old_manifest.Manifest.Files)
+            {
+                var FileUUID = item.UUID;
+                var FileVersion = new Version(item.Version.Major, item.Version.Minor, item.Version.Build + 1);
+                var FileName = item.FileName;
+                var FilePath = item.Path;
+                var FileMD5 = PublicMethod.GetMD5(Path.Combine(FilePath, FileName));
+                var FileType = item.Type;
+                var FileMode = item.Mode;
+                var FileKindOf = item.KindOf;
+            }
+            //ManifestFile b = old_manifest.Manifest.Files.First(_ => _.FileName == "Lyi.dll");
+            // 逻辑有误，需要同时能够获取新旧版本文件，单纯stdin获取单个xml不够，此处需要重新设计
             return 0;
         }
     }

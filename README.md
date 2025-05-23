@@ -65,7 +65,6 @@ Attribute["Version"]="1.2.3"
 |:-:|:-:|:-:|
 |Version(1,2,3)|更新列表版本|Version|
 
-
 ##### UUID
 
 |UUID|说明|类型|

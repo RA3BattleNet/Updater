@@ -8,30 +8,91 @@ namespace Ra3.BattleNet.Updater.Share
     /// </summary>
     public class ManifestModel
     {
+        private bool _isImported = false;
         /// <summary>
         /// 清单文件版本号 (例如 "1.0.0")
         /// </summary>
-        public Version Version { get; set; }
+        private Version _version;
 
         /// <summary>
         /// 标签信息，包含UUID、生成时间和提交信息
         /// </summary>
-        public Tags Tag { get; set; }
+        private Tags _tags;
 
         /// <summary>
         /// 包含的子模块（当前未使用）
         /// </summary>
-        public Includes Include { get; set; }
+        private Includes _includes;
 
         /// <summary>
         /// 文件清单列表
         /// </summary>
-        public Manifest Manifest { get; set; }
+        private Manifest _manifest;
+
+        public Version Version
+        {
+            get => _version;
+            private set => _version = value;
+        }
+
+        /// <summary>
+        /// 标签信息，包含UUID、生成时间和提交信息
+        /// </summary>
+        public Tags Tags
+        {
+            get => _tags;
+            set => _tags = value;
+        }
+
+        /// <summary>
+        /// 包含的子模块（当前未使用）
+        /// </summary>
+        public Includes Includes
+        {
+            get => _includes;
+            set
+            {
+                if (_isImported)
+                    throw new InvalidOperationException("XML导入的实例不允许修改子模块");
+                _includes = value;
+            }
+        }
+
+        /// <summary>
+        /// 文件清单列表
+        /// </summary>
+        public Manifest Manifest
+        {
+            get => _manifest;
+            set
+            {
+                if (_isImported)
+                    throw new InvalidOperationException("XML导入的实例不允许修改清单");
+                _manifest = value;
+            }
+        }
+        //public Manifest Manifest
+        //{
+        //    get => Manifest;
+        //    private set {
+        //        if (isImported)
+        //        {
+        //            throw new InvalidOperationException("XML ");
+        //        }
+        //    }
+        //}
 
         /// <summary>
         /// 提供空白Metadata，用于创建新的ManifestModel对象
         /// </summary>
-        //public ManifestModel() { }
+        public ManifestModel(Version _version, String _commit = "")
+        {
+            _isImported = false;
+            this._version = _version;
+            this._tags = new Tags(_commit);
+            this._includes = new Includes();
+            this._manifest = new Manifest();
+        }
 
         /// <summary>
         /// 提供Metadata的XML节点，将XML序列化，解析ManifestModel对象（暂无合法检查）
@@ -39,16 +100,12 @@ namespace Ra3.BattleNet.Updater.Share
         /// <param name="MNode">Metadata的XML结点</param>
         public ManifestModel(XmlNode MNode)
         {
+            _isImported = true;
             // 解析XML节点
-            Version = new Version(MNode.Attributes["Version"].Value);
-            Tag = new Tags(MNode.SelectSingleNode("Tags"));
-            Include = new Includes();
-            Manifest = new Manifest(MNode.SelectSingleNode("Manifest"));
-            //{
-            //    UUID = Mnode.SelectSingleNode("Tags/UUID")?.InnerText ?? Guid.NewGuid().ToString(),
-            //    GenTime = long.TryParse(Mnode.SelectSingleNode("Tags/GenTime")?.InnerText, out var genTime) ? genTime : DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            //    Commit = Mnode.SelectSingleNode("Tags/Commit")?.InnerText ?? string.Empty
-            //};
+            this._version = new Version(MNode.Attributes["Version"].Value);
+            _tags = new Tags(MNode.SelectSingleNode("Tags"));
+            _includes = new Includes();
+            _manifest = new Manifest(MNode.SelectSingleNode("Manifest"));
         }
     }
 
@@ -119,6 +176,10 @@ namespace Ra3.BattleNet.Updater.Share
         /// 文件夹列表
         /// </summary>
         public List<ManifestFolder> Folders { get; set; } = new List<ManifestFolder>();
+
+        public Manifest()
+        {
+        }
 
         /// <summary>
         /// 从XML中读取清单文件列表和文件夹列表（暂无合法检查）
@@ -195,7 +256,7 @@ namespace Ra3.BattleNet.Updater.Share
         /// 文件版本
         /// </summary>
         [Required]
-        public string Version { get; set; }
+        public Version Version { get; set; }
 
         /// <summary>
         /// 文件类型 (0:Bin, 1:Text)
@@ -235,17 +296,11 @@ namespace Ra3.BattleNet.Updater.Share
             if (_path.IndexOfAny(System.IO.Path.GetInvalidPathChars()) >= 0)
                 throw new ArgumentException("路径包含非法字符", nameof(_path));
 
-            if (string.IsNullOrWhiteSpace(_version))
-                throw new ArgumentException("版本号不能为空", nameof(_version));
-
-            if (!_version.All(c => char.IsDigit(c) || c == '.'))
-                throw new ArgumentException("版本号格式非法", nameof(_version));
-
             UUID = _uuid;
             FileName = _filename;
             MD5 = _md5;
             Path = _path;
-            Version = _version;
+            Version = new Version(_version);
             Type = _type;
             Mode = _mode;
             KindOf = _kingof;
