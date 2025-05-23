@@ -23,7 +23,7 @@ namespace Ra3.BattleNet.Updater.Server
             #region stdin读取manifest.xml
             XmlDocument inputStdinXml = new XmlDocument();
 #if DEBUG
-            inputStdinXml.Load(@"./temp.1.xml");
+            inputStdinXml.Load(@"./example.old.xml");
 #else
             string xmlInput = Console.In.ReadToEnd(); // Windows下Ctrl+Z Enter
             try
