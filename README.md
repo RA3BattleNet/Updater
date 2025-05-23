@@ -27,6 +27,7 @@
 ![设计框架图](./image/04efb197-3b09-4bec-a50a-0679abd8f28b.png)
 
 ## 详细结构设计
+
 ### 程序功能模块
 
 #### 服务端
@@ -51,11 +52,19 @@
 - TAG标记
   - UUID(暂无作用，后续可做随机种)
   - xml生成时间
+  - commit信息（不会影响程序，仅用于标记）
 - 文件列表
   - 文件夹(*可重复)
   - 文件(*可重复)
 
 #### Metadata
+
+Attribute["Version"]="1.2.3"
+
+|manifest.xml版本|说明|类型|
+|:-:|:-:|:-:|
+|Version(1,2,3)|更新列表版本|Version|
+
 
 ##### UUID
 
@@ -66,7 +75,12 @@
 ##### GenTime
 
 |xml生成时间|说明|类型|
+|:-:|:-:|:-:|
 |DateTimeOffset.Now.ToUnixTimeSeconds()|运行计算机上距离1970-01-01 00:00:00 UTC到现在的秒数|long|
+
+##### Commit
+
+任意信息即可，不会影响程序
 
 #### Includes
 
@@ -103,3 +117,21 @@
     - Force：强制使用patch，不比对文件大小
     - Skip：不使用patch，直接使用原文件
 
+### example文件目录测试例
+
+此目录作为测试例，用于测试文件更新，包含状况：文件更新，文件删除，新增文件
+
+|MD5|文件路径|
+|:-:|:-:|
+|808f0febad563484e73a78411c1d90b9|./example/new/git_version|
+|ca96a24439a42b1067d864b9bc693a85|./example/new/Lyi.dll|
+|b95dbde252cc8ea490e1d9d04ec5fe0d|./example/new/tools/aria2c.exe|
+|2db41309c9eadae1ef568f8a649289d0|./example/new/tools/EnhancerCorona.dll|
+|1c602e80d41ed740d320d0a18b87b9aa|./example/new/tools/RA3LuaBridge.dll|
+|-|-|
+|fb2b21b2238d6be4bbd687ef9626cca1|./example/old/git_version|
+|ca96a24439a42b1067d864b9bc693a85|./example/old/Lyi.dll|
+|b95dbde252cc8ea490e1d9d04ec5fe0d|./example/old/tools/aria2c.exe|
+|1327dbda98a5f18d779154c9c7549358|./example/old/tools/EnhancerCorona.dll|
+|f07deca971d5e53bd6e4b65071907b50|./example/old/tools/RA3LuaBridge.dll|
+|94248a26fb0bae39a513e4bddc2f092e|./example/old/CrazyEditor.dll|

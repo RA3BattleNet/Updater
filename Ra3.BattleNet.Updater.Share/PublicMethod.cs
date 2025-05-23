@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 
 namespace Ra3.BattleNet.Updater.Share
 {
-    public class PublicMethod
+    public static class PublicMethod
     {
         private static string? hdiffz_path = null;
         private static string? hpatch_path = null;

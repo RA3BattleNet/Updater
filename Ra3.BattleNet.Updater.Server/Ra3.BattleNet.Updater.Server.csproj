@@ -7,4 +7,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Ra3.BattleNet.Updater.Share\Ra3.BattleNet.Updater.Share.csproj" />
+  </ItemGroup>
+
 </Project>

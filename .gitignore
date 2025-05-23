@@ -413,3 +413,4 @@ FodyWeavers.xsd
 *.vsix
 
 temp.*
+temp/
