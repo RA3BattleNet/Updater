@@ -1,4 +1,4 @@
-﻿namespace Ra3.BattleNet.Updater.Share
+﻿namespace Ra3.BattleNet.Updater.Share.Log
 {
     public static class Logger
     {

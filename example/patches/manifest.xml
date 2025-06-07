@@ -1,0 +1,60 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Metadata Version="1.0.1">
+  <Tags>
+    <UUID>4f9f112a990744eda1fd488804d1e68e</UUID>
+    <GenTime>1749275497</GenTime>
+    <Commit>自动生成</Commit>
+  </Tags>
+  <Manifest>
+    <File>
+      <UUID>1ba2ef182c6e4e03a2030fd102dfaa64</UUID>
+      <FileName>git_version</FileName>
+      <MD5>808f0febad563484e73a78411c1d90b9</MD5>
+      <Path />
+      <Version>0.0.0</Version>
+      <Type>Bin</Type>
+      <Mode>Auto</Mode>
+      <KindOf />
+    </File>
+    <File>
+      <UUID>2f69e65d2ed6485d862bbc205dff00ea</UUID>
+      <FileName>Lyi.dll</FileName>
+      <MD5>ca96a24439a42b1067d864b9bc693a85</MD5>
+      <Path />
+      <Version>0.0.0</Version>
+      <Type>Bin</Type>
+      <Mode>Auto</Mode>
+      <KindOf />
+    </File>
+    <File>
+      <UUID>b25249f3a0b040f5936ddd9b01448a34</UUID>
+      <FileName>aria2c.exe</FileName>
+      <MD5>b95dbde252cc8ea490e1d9d04ec5fe0d</MD5>
+      <Path>tools</Path>
+      <Version>0.0.0</Version>
+      <Type>Bin</Type>
+      <Mode>Auto</Mode>
+      <KindOf />
+    </File>
+    <File>
+      <UUID>b87b6fa9e90343e1904ed2fab578cc3d</UUID>
+      <FileName>EnhancerCorona.dll</FileName>
+      <MD5>2db41309c9eadae1ef568f8a649289d0</MD5>
+      <Path>tools</Path>
+      <Version>0.0.0</Version>
+      <Type>Bin</Type>
+      <Mode>Auto</Mode>
+      <KindOf />
+    </File>
+    <File>
+      <UUID>094aafec5ebe4a17bfa53b76145a1e6d</UUID>
+      <FileName>RA3LuaBridge.dll</FileName>
+      <MD5>1c602e80d41ed740d320d0a18b87b9aa</MD5>
+      <Path>tools</Path>
+      <Version>0.0.0</Version>
+      <Type>Bin</Type>
+      <Mode>Auto</Mode>
+      <KindOf />
+    </File>
+  </Manifest>
+</Metadata>

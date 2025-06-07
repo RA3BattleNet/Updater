@@ -1,8 +1,11 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Ra3.BattleNet.Updater.Share.Log;
 using System.Xml;
 
-namespace Ra3.BattleNet.Updater.Share
+namespace Ra3.BattleNet.Updater.Share.Models
 {
+    public enum FileTypeEnum { Bin = 0, Text = 1 }
+    public enum FileModeEnum { Auto = 0, Force = 1, Skip = 2 }
     /// <summary>
     /// 表示整个清单文件的根对象
     /// </summary>
@@ -85,13 +88,13 @@ namespace Ra3.BattleNet.Updater.Share
         /// <summary>
         /// 提供空白Metadata，用于创建新的ManifestModel对象
         /// </summary>
-        public ManifestModel(Version _version, String _commit = "")
+        public ManifestModel(Version _version, string _commit = "")
         {
             _isImported = false;
             this._version = _version;
-            this._tags = new Tags(_commit);
-            this._includes = new Includes();
-            this._manifest = new Manifest();
+            _tags = new Tags(_commit);
+            _includes = new Includes();
+            _manifest = new Manifest();
         }
 
         /// <summary>
@@ -102,7 +105,7 @@ namespace Ra3.BattleNet.Updater.Share
         {
             _isImported = true;
             // 解析XML节点
-            this._version = new Version(MNode.Attributes["Version"].Value);
+            _version = new Version(MNode.Attributes["Version"].Value);
             _tags = new Tags(MNode.SelectSingleNode("Tags"));
             _includes = new Includes();
             _manifest = new Manifest(MNode.SelectSingleNode("Manifest"));
@@ -137,7 +140,7 @@ namespace Ra3.BattleNet.Updater.Share
         /// <param name="TagsNode"></param>
         public Tags(XmlNode TagsNode)
         {
-            UUID = new Guid((TagsNode["UUID"].InnerText));
+            UUID = new Guid(TagsNode["UUID"].InnerText);
             GenTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(TagsNode["GenTime"].InnerText));
             Commit = TagsNode["Commit"].InnerText;
         }
@@ -146,7 +149,7 @@ namespace Ra3.BattleNet.Updater.Share
         /// 创建新Tags对象
         /// </summary>
         /// <param name="_commit"></param>
-        public Tags(String _commit = "")
+        public Tags(string _commit = "")
         {
             UUID = Guid.NewGuid();
             GenTime = DateTimeOffset.UtcNow;
@@ -205,8 +208,8 @@ namespace Ra3.BattleNet.Updater.Share
                         item["MD5"].InnerText,
                         item["Path"].InnerText,
                         item["Version"].InnerText,
-                        byte.Parse(item["Type"].InnerText),
-                        byte.Parse(item["Mode"].InnerText),
+                        (FileTypeEnum)Enum.Parse(typeof(FileTypeEnum),item["Type"].InnerText),
+                        (FileModeEnum)Enum.Parse(typeof(FileModeEnum), item["Mode"].InnerText),
                         item["KindOf"].InnerText);
                     Files.Add(temp);
                 }
@@ -261,22 +264,22 @@ namespace Ra3.BattleNet.Updater.Share
         /// <summary>
         /// 文件类型 (0:Bin, 1:Text)
         /// </summary>
-        public byte Type { get; set; } = 0;
+        public FileTypeEnum Type { get; set; } = FileTypeEnum.Bin;
 
         /// <summary>
         /// 程序处理模式 (0:Auto, 1:Force, 2:Skip)
         /// </summary>
-        public byte Mode { get; set; } = 0;
+        public FileModeEnum Mode { get; set; } = FileModeEnum.Auto;
 
         /// <summary>
         /// 文件种类标识 (例如 "APPLICATION;PROGRAM;")
         /// </summary>
-        public string KindOf { get; set; } = String.Empty;
+        public string KindOf { get; set; } = string.Empty;
 
         /// <summary>
         /// 快速初始化
         /// </summary>
-        public ManifestFile(Guid _uuid, string _filename, string _md5, string _path, string _version, byte _type = 0, byte _mode = 0, string _kingof = "")
+        public ManifestFile(Guid _uuid, string _filename, string _md5, string _path, string _version, FileTypeEnum _type = FileTypeEnum.Bin, FileModeEnum _mode = FileModeEnum.Auto, string _kingof = "")
         {
             if (_uuid == Guid.Empty)
                 throw new ArgumentException("UUID 不能为空", nameof(_uuid));
@@ -291,8 +294,6 @@ namespace Ra3.BattleNet.Updater.Share
             if (_md5.Length != 32 || !_md5.All("0123456789abcdefABCDEF".Contains))
                 throw new ArgumentException("MD5 格式非法", nameof(_md5));
 
-            if (string.IsNullOrWhiteSpace(_path))
-                throw new ArgumentException("路径不能为空", nameof(_path));
             if (_path.IndexOfAny(System.IO.Path.GetInvalidPathChars()) >= 0)
                 throw new ArgumentException("路径包含非法字符", nameof(_path));
 

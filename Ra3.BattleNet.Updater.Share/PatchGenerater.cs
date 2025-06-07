@@ -1,5 +1,5 @@
 ﻿using System.Diagnostics;
-using static Ra3.BattleNet.Updater.Share.PublicMethod;
+using static Ra3.BattleNet.Updater.Share.Utilities.PublicMethod;
 
 namespace Ra3.BattleNet.Updater.Share
 {

@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
-namespace Ra3.BattleNet.Updater.Share
+namespace Ra3.BattleNet.Updater.Share.Utilities
 {
     public static class PublicMethod
     {

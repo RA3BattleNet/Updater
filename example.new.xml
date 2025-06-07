@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Metadata Version="1.0.0">
     <Tags>
-        <UUID>c90ef373a1c248ec95c5291e53da6ff5</UUID>
-        <GenTime>1747954298</GenTime>
-        <Commit>此为客户端旧版manifest.xml文件模拟</Commit>
+        <UUID>b5cc67e8ad734d8fb4909bee8b66f363</UUID>
+        <GenTime>1747884298</GenTime>
+        <Commit>最新版manifest.xml模拟</Commit>
     </Tags>
     <Includes>
         <!-- 子模块 -->
@@ -13,9 +13,9 @@
         <File>
             <UUID>ec8819ac93624b23903025f67d120879</UUID>
             <FileName>git_version</FileName>
-            <MD5>fb2b21b2238d6be4bbd687ef9626cca1</MD5>
+            <MD5>808f0febad563484e73a78411c1d90b9</MD5>
             <Path>/</Path>
-            <Version>1.0.0</Version>
+            <Version>1.0.1</Version>
             <Type>0</Type>
             <Mode>0</Mode>
             <KindOf>APPLICATION;PROGRAM;</KindOf>
@@ -25,17 +25,7 @@
             <FileName>Lyi.dll</FileName>
             <MD5>ca96a24439a42b1067d864b9bc693a85</MD5>
             <Path>/</Path>
-            <Version>1.0.0</Version>
-            <Type>0</Type>
-            <Mode>0</Mode>
-            <KindOf>APPLICATION;PROGRAM;</KindOf>
-        </File>
-        <File>
-            <UUID>6d1ca034eeb84a43b9c935977325a635</UUID>
-            <FileName>CrazyEditor.dll</FileName>
-            <MD5>94248a26fb0bae39a513e4bddc2f092e</MD5>
-            <Path>/</Path>
-            <Version>1.0.0</Version>
+            <Version>1.0.1</Version>
             <Type>0</Type>
             <Mode>0</Mode>
             <KindOf>APPLICATION;PROGRAM;</KindOf>
@@ -45,7 +35,7 @@
             <FileName>aria2c.exe</FileName>
             <MD5>b95dbde252cc8ea490e1d9d04ec5fe0d</MD5>
             <Path>//tools</Path>
-            <Version>1.0.0</Version>
+            <Version>1.0.1</Version>
             <Type>0</Type>
             <Mode>0</Mode>
             <KindOf>APPLICATION;PROGRAM;</KindOf>
@@ -53,9 +43,9 @@
         <File>
             <UUID>4f983c9756f14d668b514116009cc769</UUID>
             <FileName>EnhancerCorona.dll</FileName>
-            <MD5>1327dbda98a5f18d779154c9c7549358</MD5>
+            <MD5>2db41309c9eadae1ef568f8a649289d0</MD5>
             <Path>//tools</Path>
-            <Version>1.0.0</Version>
+            <Version>1.0.1</Version>
             <Type>0</Type>
             <Mode>0</Mode>
             <KindOf>APPLICATION;PROGRAM;</KindOf>
@@ -63,9 +53,9 @@
         <File>
             <UUID>7e57fc5329f744ad938faa530f680c3b</UUID>
             <FileName>RA3LuaBridge.dll</FileName>
-            <MD5>f07deca971d5e53bd6e4b65071907b50</MD5>
+            <MD5>1c602e80d41ed740d320d0a18b87b9aa</MD5>
             <Path>//tools</Path>
-            <Version>1.0.0</Version>
+            <Version>1.0.1</Version>
             <Type>0</Type>
             <Mode>0</Mode>
             <KindOf>APPLICATION;PROGRAM;</KindOf>

@@ -2,6 +2,7 @@
   "profiles": {
     "Ra3.BattleNet.Updater.Server": {
       "commandName": "Project",
+      "commandLineArgs": "  --old-manifest ./example.old.xml \\\r\n  --old-base ./example/old \\\r\n  --base ./example/new \\\r\n  --new-version 1.0.1 \\\r\n  --output ./example/patches\r\n  --debug",
       "workingDirectory": "$(SolutionDir)"
     }
   }
