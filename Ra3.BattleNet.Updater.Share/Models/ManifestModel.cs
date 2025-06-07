@@ -1,6 +1,9 @@
-﻿using System.ComponentModel.DataAnnotations;
-using Ra3.BattleNet.Updater.Share.Log;
+﻿using Ra3.BattleNet.Updater.Share.Log;
+using Ra3.BattleNet.Updater.Share.Utilities;
+using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Xml;
+using System.Xml.Linq;
 
 namespace Ra3.BattleNet.Updater.Share.Models
 {
@@ -85,13 +88,32 @@ namespace Ra3.BattleNet.Updater.Share.Models
         //    }
         //}
 
+        public ManifestModel(string XmlPath)
+        {
+            _isImported = true;
+
+            XmlDocument xmlDoc = new XmlDocument();
+            xmlDoc.Load(XmlPath);
+
+            XmlNode? MNode = xmlDoc.SelectSingleNode("/Metadata");
+            //if (MNode == null)
+            //{
+            //    Logger.Fail("XML 解析失败: Metadata 节点不存在\n");
+            //    Environment.Exit(-4);
+            //}
+            _version = new Version(MNode.Attributes["Version"].Value);
+            _tags = new Tags(MNode.SelectSingleNode("Tags"));
+            _includes = new Includes();
+            _manifest = new Manifest(MNode.SelectSingleNode("Manifest"));
+        }
+
         /// <summary>
         /// 提供空白Metadata，用于创建新的ManifestModel对象
         /// </summary>
-        public ManifestModel(Version _version, string _commit = "")
+        public ManifestModel(Version ver,string _commit = "")
         {
             _isImported = false;
-            this._version = _version;
+            this._version = ver;
             _tags = new Tags(_commit);
             _includes = new Includes();
             _manifest = new Manifest();
@@ -111,6 +133,9 @@ namespace Ra3.BattleNet.Updater.Share.Models
             _manifest = new Manifest(MNode.SelectSingleNode("Manifest"));
         }
     }
+
+
+    
 
     /// <summary>
     /// 标签信息
@@ -157,6 +182,9 @@ namespace Ra3.BattleNet.Updater.Share.Models
         }
     }
 
+
+
+
     /// <summary>
     /// 包含的子模块（当前未使用）
     /// </summary>
@@ -164,6 +192,9 @@ namespace Ra3.BattleNet.Updater.Share.Models
     {
         // 根据XML，当前Includes为空，未来可能需要扩展
     }
+
+
+
 
     /// <summary>
     /// 文件清单
@@ -200,7 +231,7 @@ namespace Ra3.BattleNet.Updater.Share.Models
                     if (Files.Any(_ => _.UUID == tempuuid))
                     {
                         Logger.Warning($"Manifest 中存在重复的文件\n");
-                        Logger.Debug($"{item.OuterXml}\n");
+                        Logger.Debug($"{item.OuterXml}{Environment.NewLine}");
                         continue;
                     }
                     ManifestFile temp = new ManifestFile(tempuuid,
@@ -225,6 +256,10 @@ namespace Ra3.BattleNet.Updater.Share.Models
             //}
         }
     }
+
+
+
+
 
     /// <summary>
     /// 清单中的文件项
@@ -307,6 +342,10 @@ namespace Ra3.BattleNet.Updater.Share.Models
             KindOf = _kingof;
         }
     }
+
+
+
+
 
     /// <summary>
     /// 清单中的文件夹项

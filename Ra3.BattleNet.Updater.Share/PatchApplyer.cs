@@ -5,7 +5,7 @@ namespace Ra3.BattleNet.Updater.Share
 {
     public class PatchApplyer
     {
-        public static void ApplyP(string oldFile, string diffFile, string outNewPath)
+        public static void ApplyPatch(string oldFile, string diffFile, string outNewPath)
         {
             var psi = new ProcessStartInfo
             {

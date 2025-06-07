@@ -5,7 +5,7 @@ namespace Ra3.BattleNet.Updater.Share
 {
     public class PatchGenerater
     {
-        public static void GenerateP(string oldFile, string newFile, string deltaFile)
+        public static bool GeneratePatch(string oldFile, string newFile, string deltaFile)
         {
             var psi = new ProcessStartInfo
             {
@@ -29,6 +29,7 @@ namespace Ra3.BattleNet.Updater.Share
                     Console.WriteLine($"出现错误：{Environment.NewLine}{error}");
                 }
             }
+            return true;
         }
     }
 }
