@@ -30,7 +30,7 @@
             <Mode>0</Mode>
             <KindOf>APPLICATION;PROGRAM;</KindOf>
         </File>
-        <File>
+        <File> 
             <UUID>34d5ea9a6e9c40c6b4dcab49973530d8</UUID>
             <FileName>aria2c.exe</FileName>
             <MD5>b95dbde252cc8ea490e1d9d04ec5fe0d</MD5>

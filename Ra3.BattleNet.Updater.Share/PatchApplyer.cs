@@ -5,7 +5,7 @@ namespace Ra3.BattleNet.Updater.Share
 {
     public class PatchApplyer
     {
-        public static void ApplyPatch(string oldFile, string diffFile, string outNewPath)
+        public static bool ApplyPatch(string oldFile, string diffFile, string outNewPath)
         {
             var psi = new ProcessStartInfo
             {
@@ -29,6 +29,7 @@ namespace Ra3.BattleNet.Updater.Share
                     Console.WriteLine($"出现错误：{Environment.NewLine}{error}");
                 }
             }
+            return true;
         }
     }
 }

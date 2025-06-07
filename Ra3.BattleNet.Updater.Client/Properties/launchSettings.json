@@ -2,6 +2,7 @@
   "profiles": {
     "Ra3.BattleNet.Updater.Client": {
       "commandName": "Project",
+      "commandLineArgs": "patch --target ./example/old --patch ./example/patch",
       "workingDirectory": "$(SolutionDir)"
     }
   }
