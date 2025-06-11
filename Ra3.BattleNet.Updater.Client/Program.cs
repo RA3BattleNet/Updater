@@ -8,7 +8,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml;
-using Ra3.BattleNet.Updater.Share;
 namespace Ra3.BattleNet.Updater.Client
 {
     internal class Program

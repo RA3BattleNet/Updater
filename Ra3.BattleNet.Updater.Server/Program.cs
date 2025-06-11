@@ -1,5 +1,4 @@
-﻿using Ra3.BattleNet.Updater.Share;
-using Ra3.BattleNet.Updater.Share.Log;
+﻿using Ra3.BattleNet.Updater.Share.Log;
 using Ra3.BattleNet.Updater.Share.Models;
 using Ra3.BattleNet.Updater.Share.Utilities;
 using System.Diagnostics;
@@ -9,6 +8,80 @@ using System.Xml;
 
 namespace Ra3.BattleNet.Updater.Server
 {
+    internal class CommandLineOptions
+    {
+        public string? OldManifestPath { get; set; }
+        public string? NewManifestPath { get; set; }
+        public string? OldBasePath { get; set; }
+        public string? NewBasePath { get; set; }
+        public string? OutputPath { get; set; }
+    }
+
+    internal static class CommandLineParser
+    {
+        public static CommandLineOptions Parse(string[] args)
+        {
+            CommandLineOptions options = new CommandLineOptions();
+
+            try
+            {
+                for (int i = 0; i < args.Length; i++)
+                {
+                    switch (args[i])
+                    {
+                        case "--old-manifest":
+                            options.OldManifestPath = args[++i];
+                            break;
+                        case "--new-manifest":
+                            options.NewManifestPath = args[++i];
+                            break;
+                        case "--old-base":
+                            options.OldBasePath = args[++i];
+                            break;
+                        case "--new-base":
+                            options.NewBasePath = args[++i];
+                            break;
+                        case "--output":
+                            options.OutputPath = args[++i];
+                            break;
+                    }
+                }
+
+                // 验证必要参数
+                if (string.IsNullOrEmpty(options.OldManifestPath)
+                    || string.IsNullOrEmpty(options.NewManifestPath)
+                    || string.IsNullOrEmpty(options.OldBasePath)
+                    || string.IsNullOrEmpty(options.NewBasePath))
+                {
+                    Logger.Fail("缺少必要参数\n");
+                    ShowUsage();
+                    Environment.Exit(-1);
+                }
+
+                options.OutputPath ??= Directory.GetCurrentDirectory();
+
+                return options;
+            }
+            catch (Exception ex)
+            {
+                Logger.Fail($"参数无法解析{Environment.NewLine}Msg:{ex.Message}");
+                ShowUsage();
+                Environment.Exit(-2);
+            }
+            return options;
+        }
+
+        public static void ShowUsage()
+        {
+            Console.Write("使用方式:\n");
+            Console.Write("--old-manifest [路径] 旧版本清单文件\n");
+            Console.Write("--new-manifest [路径] 新版本清单文件\n");
+            Console.Write("--old-base [路径]     旧版本文件目录\n");
+            Console.Write("--new-base [路径]     新版本文件目录\n");
+            Console.Write("--output [路径]       最终输出目录 (可选，默认当前目录)\n");
+        }
+    }
+
     internal class Program
     {
         static int Main(string[] args)
@@ -20,28 +93,30 @@ namespace Ra3.BattleNet.Updater.Server
             Logger.IsDebug = args.Contains("--debug");
 #endif
             Logger.Info("Updater Server init\n");
-            Logger.Debug($"{string.Join(" ", args)}{Environment.NewLine}");
+            Logger.Debug($"args: {string.Join(" ", args)}{Environment.NewLine}");
             // 解析
-            CommandLineOptions? options = CommandLineParser.Parse(args);
-            if (options == null)
-            {
-                Logger.Fail("参数解析失败，请检查输入。\n");
-                //options?.ShowUsage();
-                return -1;
-            }
+            CommandLineOptions options = CommandLineParser.Parse(args);
+            
+            //if (options == null)
+            //{
+            //    Logger.Fail("参数解析失败，请检查输入。\n");
+            //    //options?.ShowUsage();
+            //    return -1;
+            //}
 
             ManifestModel oldManifest = new ManifestModel(options.OldManifestPath);
+            
             if (oldManifest == null)
             {
-                Logger.Fail("旧版本清单加载失败，请检查路径和格式。\n");
-                return -2;
+                Logger.Fail($"旧版本清单加载失败，请检查路径和格式。\n");
+                Environment.Exit(-3);
             }
 
             ManifestModel newManifest = new ManifestModel(options.NewManifestPath);
             if (oldManifest == null)
             {
                 Logger.Fail("新版本清单加载失败，请检查路径和格式。\n");
-                return -3;
+                Environment.Exit(-4);
             }
 
             Logger.Info($" Manifest : v{oldManifest.Version}({oldManifest.Tags.Commit}) -> v{newManifest.Version}({newManifest.Tags.Commit})\n");
@@ -52,7 +127,11 @@ namespace Ra3.BattleNet.Updater.Server
                 options.NewBasePath,
                 options.OutputPath);
 
-            if (patchOperations == null) return -4;
+            if (patchOperations == null)
+            {
+                Logger.Fail($"补丁计算出错{Environment.NewLine}");
+                Environment.Exit(-5);
+            }
 
             // 生成补丁包
             GeneratePatchPackage(patchOperations, newManifest, options.OutputPath);
@@ -70,8 +149,9 @@ namespace Ra3.BattleNet.Updater.Server
             List<PatchOperation> operations = new List<PatchOperation>();
 
             Directory.CreateDirectory(outputPath);
+            Directory.CreateDirectory(Path.Combine(outputPath,"files"));
             Logger.Debug($"Patch相对输出路径：{outputPath}{Environment.NewLine}");
-            
+
             foreach (var newFile in newManifest.Manifest.Files)
             {
                 var oldFile = oldManifest.Manifest.Files
@@ -85,8 +165,9 @@ namespace Ra3.BattleNet.Updater.Server
                         Type = OperationTypeEnum.ForceCopy,
                         File = newFile,
                         SourcePath = Path.Combine(newBasePath, newFile.Path.TrimStart('/', '\\'), newFile.FileName),
+
                     });
-                    Logger.Info($"新文件: {newFile.FileName}{newFile.UUID}\n");
+                    Logger.Info($"检测到新文件: {newFile.FileName}{newFile.UUID}\n");
                     continue;
                 }
 
@@ -95,7 +176,20 @@ namespace Ra3.BattleNet.Updater.Server
                 {
                     if (newFile.Mode == FileModeEnum.Skip)
                     {
-                        Logger.Warning($"此文件被标记跳过: {newFile.FileName}\n");
+                        Logger.Warning($"此文件被标记跳过: {oldFile.FileName} -> {newFile.FileName}\n");
+                        continue;
+                    }
+
+                    if (newFile.Mode == FileModeEnum.Force)
+                    {
+                        Logger.Warning($"此文件被标记强制更新：{oldFile.FileName} -> {newFile.FileName}\n");
+                        operations.Add(new PatchOperation
+                        {
+                            Type = OperationTypeEnum.ForceCopy,
+                            File = newFile,
+                            SourcePath = Path.Combine(newBasePath, newFile.Path.TrimStart('/', '\\'), newFile.FileName),
+
+                        });
                         continue;
                     }
 
@@ -104,7 +198,7 @@ namespace Ra3.BattleNet.Updater.Server
 
                     if (!File.Exists(oldFilePath))
                     {
-                        Logger.Warning($"旧版本文件不存在，将提供完整文件: {newFile.FileName}\n");
+                        Logger.Warning($"旧版本文件不存在，提供完整文件: {newFile.FileName}\n");
                         operations.Add(new PatchOperation
                         {
                             Type = OperationTypeEnum.ForceCopy,
@@ -115,7 +209,7 @@ namespace Ra3.BattleNet.Updater.Server
                     else
                     {
                         string patchFileName = $"{newFile.UUID:N}.hdiff";
-                        string patchFilePath = Path.Combine(outputPath, "files",patchFileName);
+                        string patchFilePath = Path.Combine(outputPath, "files", patchFileName);
 
                         if (PatchGenerater.GeneratePatch(oldFilePath, newFilePath, patchFilePath))
                         {
@@ -144,6 +238,17 @@ namespace Ra3.BattleNet.Updater.Server
                             continue;
                         }
                     }
+                }
+                else if (oldFile.FileName != newFile.FileName || oldFile.Path != newFile.Path)
+                {
+                    Logger.Warning($"文件未变化，但是需mv: {Path.Combine(oldFile.Path.TrimStart('/', '\\'), oldFile.FileName)}->{Path.Combine(newFile.Path.TrimStart('/', '\\'), newFile.FileName)}{Environment.NewLine}");
+                    Debug.Assert(false, "暂无支持，TO DO");
+                    operations.Add(new PatchOperation
+                    {
+                        Type = OperationTypeEnum.Move,
+                        // 移动 TO DO
+                        File = newFile
+                    });
                 }
                 else
                 {
@@ -196,7 +301,12 @@ namespace Ra3.BattleNet.Updater.Server
                         //File.Copy(op.PatchPath, patchDest, true);
                         op.RelativePath = $"files/{op.File.UUID:N}.hdiff";
                         break;
-                       
+
+                    case OperationTypeEnum.Move:
+                        Debug.Assert(false, "暂未支持 TO DO");
+                        break;
+                        
+
                 }
             }
 
@@ -243,71 +353,5 @@ namespace Ra3.BattleNet.Updater.Server
         }
     }
 
-    // 命令行参数解析类
-    internal class CommandLineOptions
-    {
-        public string OldManifestPath { get; set; }
-        public string NewManifestPath { get; set; }
-        public string OldBasePath { get; set; }
-        public string NewBasePath { get; set; }
-        public string OutputPath { get; set; }
-    }
 
-    internal static class CommandLineParser
-    {
-        public static CommandLineOptions Parse(string[] args)
-        {
-            var options = new CommandLineOptions();
-
-            try
-            {
-                for (int i = 0; i < args.Length; i++)
-                {
-                    switch (args[i])
-                    {
-                        case "--old-manifest":
-                            options.OldManifestPath = args[++i];
-                            break;
-                        case "--new-manifest":
-                            options.NewManifestPath = args[++i];
-                            break;
-                        case "--old-base":
-                            options.OldBasePath = args[++i];
-                            break;
-                        case "--new-base":
-                            options.NewBasePath = args[++i];
-                            break;
-                        case "--output":
-                            options.OutputPath = args[++i];
-                            break;
-                    }
-                }
-
-                // 验证必要参数
-                if (string.IsNullOrEmpty(options.OldManifestPath)
-                    || string.IsNullOrEmpty(options.NewManifestPath)
-                    || string.IsNullOrEmpty(options.OldBasePath)
-                    || string.IsNullOrEmpty(options.NewBasePath))
-                {
-                    throw new Exception("缺少必要参数");
-                }
-
-                options.OutputPath ??= Directory.GetCurrentDirectory();
-
-                return options;
-            }
-            catch (Exception ex)
-            {
-                Logger.Fail($"参数解析失败: {ex.Message}\n");
-                Logger.Info("使用方式:\n");
-                Logger.Info("--old-manifest [路径] 旧版本清单文件\n");
-                Logger.Info("--new-manifest [路径] 新版本清单文件\n");
-                Logger.Info("--old-base [路径]     旧版本文件目录\n");
-                Logger.Info("--new-base [路径]     新版本文件目录\n");
-                Logger.Info("--patch-output [路径] 补丁输出目录 (可选，默认临时目录)\n");
-                Logger.Info("--output [路径]       最终输出目录 (可选，默认当前目录)\n");
-                return null;
-            }
-        }
-    }
 }

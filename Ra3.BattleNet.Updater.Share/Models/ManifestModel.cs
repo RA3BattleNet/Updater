@@ -91,16 +91,22 @@ namespace Ra3.BattleNet.Updater.Share.Models
         public ManifestModel(string XmlPath)
         {
             _isImported = true;
-
             XmlDocument xmlDoc = new XmlDocument();
-            xmlDoc.Load(XmlPath);
-
+            try
+            {
+                xmlDoc.Load(XmlPath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Fail($"无法加载XML：{XmlPath}{Environment.NewLine}");
+                Environment.Exit(2);
+            }
             XmlNode? MNode = xmlDoc.SelectSingleNode("/Metadata");
-            //if (MNode == null)
-            //{
-            //    Logger.Fail("XML 解析失败: Metadata 节点不存在\n");
-            //    Environment.Exit(-4);
-            //}
+            if (MNode == null)
+            {
+                Logger.Fail("XML 解析失败: Metadata 节点不存在\n");
+                Environment.Exit(3);
+            }
             _version = new Version(MNode.Attributes["Version"].Value);
             _tags = new Tags(MNode.SelectSingleNode("Tags"));
             _includes = new Includes();

@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Ra3.BattleNet.Updater.XmlGenerator": {
+      "commandName": "Project",
+      "commandLineArgs": "./example/old",
+      "workingDirectory": "$(SolutionDir)"
+    }
+  }
+}

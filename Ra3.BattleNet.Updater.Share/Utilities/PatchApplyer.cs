@@ -1,7 +1,8 @@
-﻿using System.Diagnostics;
+﻿using Ra3.BattleNet.Updater.Share.Log;
+using System.Diagnostics;
 using static Ra3.BattleNet.Updater.Share.Utilities.PublicMethod;
 
-namespace Ra3.BattleNet.Updater.Share
+namespace Ra3.BattleNet.Updater.Share.Utilities
 {
     public class PatchApplyer
     {
@@ -17,7 +18,7 @@ namespace Ra3.BattleNet.Updater.Share
                 CreateNoWindow = true
             };
 
-            using (var process = Process.Start(psi))
+            using (Process? process = Process.Start(psi))
             {
                 string output = process.StandardOutput.ReadToEnd();
                 Console.WriteLine(output);
@@ -26,7 +27,7 @@ namespace Ra3.BattleNet.Updater.Share
                 if (process.ExitCode != 0)
                 {
                     string error = process.StandardError.ReadToEnd();
-                    Console.WriteLine($"出现错误：{Environment.NewLine}{error}");
+                    Logger.Fail($"应用补丁出现错误：{Environment.NewLine}{error}");
                 }
             }
             return true;
