@@ -320,7 +320,7 @@ namespace Ra3.BattleNet.Updater.Share.Models
         /// <summary>
         /// 快速初始化
         /// </summary>
-        public ManifestFile(Guid _uuid, string _filename, string _md5, string _path, string _version, FileTypeEnum _type = FileTypeEnum.Bin, FileModeEnum _mode = FileModeEnum.Auto, string _kingof = "")
+        public ManifestFile(Guid _uuid, string _filename, string _md5, string _path, string _version, FileTypeEnum _type = FileTypeEnum.Bin, FileModeEnum _mode = FileModeEnum.Auto, string _kingof = "NULL")
         {
             if (_uuid == Guid.Empty)
                 throw new ArgumentException("UUID 不能为空", nameof(_uuid));

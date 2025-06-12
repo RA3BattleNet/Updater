@@ -2,7 +2,7 @@
   "profiles": {
     "Ra3.BattleNet.Updater.XmlGenerator": {
       "commandName": "Project",
-      "commandLineArgs": "./example/old",
+      "commandLineArgs": "--target-dir .\\example\\old\\ --new-xmloutputpath .\\example\\generate.old.xml",
       "workingDirectory": "$(SolutionDir)"
     }
   }
