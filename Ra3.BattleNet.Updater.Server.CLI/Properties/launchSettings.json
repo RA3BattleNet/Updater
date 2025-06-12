@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Ra3.BattleNet.Updater.Server": {
+    "Ra3.BattleNet.Updater.Server.CLI": {
       "commandName": "Project",
       "commandLineArgs": "--old-manifest ./example.old.xml --old-base ./example/old --new-manifest ./example.new.xml --new-base ./example/new --output ./example/patch --debug",
       "workingDirectory": "$(SolutionDir)"
