@@ -1,6 +1,7 @@
 ﻿using Ra3.BattleNet.Updater.Share.Log;
 using Ra3.BattleNet.Updater.Share.Models;
 using Ra3.BattleNet.Updater.Share.Utilities;
+using System;
 using System.Text.Json;
 
 namespace Ra3.BattleNet.Updater.Client
@@ -33,7 +34,7 @@ namespace Ra3.BattleNet.Updater.Client
 
             foreach (var operation in patchManifest.Operations)
             {
-                string fullTargetPath = Path.Combine(targetPath, operation.FilePath.TrimStart('/'));
+                string fullTargetPath = Path.Combine(targetPath, operation.FilePath.TrimStart(new char[]{ '\\' ,'/'}));
                 string fullSourcePath = operation.RelativePath != null
                     ? Path.Combine(patchPath, operation.RelativePath)
                     : null;
@@ -42,7 +43,7 @@ namespace Ra3.BattleNet.Updater.Client
                 {
                     switch (operation.Type.ToLower())
                     {
-                        case "add":
+                        case "forcecopy":
                             Logger.Info($"添加文件: {operation.FilePath}\n");
                             Directory.CreateDirectory(Path.GetDirectoryName(fullTargetPath));
                             File.Copy(fullSourcePath, fullTargetPath, overwrite: true);

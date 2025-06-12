@@ -162,7 +162,7 @@ namespace Ra3.BattleNet.Updater.Server
                 {
                     case OperationTypeEnum.ForceCopy:
                         string destPath = Path.Combine(filesDir, $"{op.File.UUID:N}");
-                        //File.Copy(op.SourcePath, destPath, true);
+                        File.Copy(op.SourcePath, destPath, true);
                         op.RelativePath = $"files/{op.File.UUID:N}";
                         break;
 

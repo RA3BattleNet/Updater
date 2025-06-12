@@ -2,7 +2,7 @@
   "profiles": {
     "Ra3.BattleNet.Updater.Server.CLI": {
       "commandName": "Project",
-      "commandLineArgs": "--old-manifest ./example.old.xml --old-base ./example/old --new-manifest ./example.new.xml --new-base ./example/new --output ./example/patch --debug",
+      "commandLineArgs": "--old-manifest C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.11.9123.42797.xml --old-base C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.11.9123.42797\\ --new-manifest C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.12.9269.19502.xml --new-base C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.12.9269.19502\\ --output C:\\Users\\kt\\Downloads\\test\\patch --debug",
       "workingDirectory": "$(SolutionDir)"
     }
   }
