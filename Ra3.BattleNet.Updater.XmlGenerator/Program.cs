@@ -1,9 +1,8 @@
 ﻿using System.Xml;
-using System.Globalization;
-
 using Ra3.BattleNet.Updater.Share.Log;
 using static Ra3.BattleNet.Updater.Share.Utilities.PublicMethod;
 using Ra3.BattleNet.Updater.Share.Models;
+using System.Globalization;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,6 +10,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
+using System.ComponentModel.DataAnnotations;
 namespace Ra3.BattleNet.Updater.XmlGenerator
 {
     internal class CommandLineOptions
@@ -53,7 +53,7 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
             }
             catch (Exception ex)
             {
-                Logger.Fail($"参数无法解析{Environment.NewLine}Msg:{ex.Message}");
+                Logger.Fail($"参数无法解析{Environment.NewLine}Msg:{ex.Message}{Environment.NewLine}");
                 ShowUsage();
                 Environment.Exit(-2);
             }
@@ -69,14 +69,12 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
             Console.WriteLine("  --target-dir <目录>       必需，指定目标目录");
             Console.WriteLine("  --new-xmloutputpath <路径> 指定新生成的xml输出路径");
             Console.WriteLine("  --help                    显示帮助信息");
+            Console.WriteLine("  --debug                   开启DEBUG调试");
             Console.WriteLine();
-            Console.WriteLine("示例:");
-            Console.WriteLine("  Ra3.BattleNet.Updater.XmlGenerator.exe --target-dir C:\\game\\data --new-xmloutputpath C:\\output\\new.xml");
-            Console.WriteLine("  Ra3.BattleNet.Updater.XmlGenerator.exe --old-xmlpath C:\\old.xml --target-dir C:\\game\\data");
         }
 
     }
-    
+
 
     internal class Program
     {
@@ -116,7 +114,7 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
             metadataNode.AppendChild(manifestNode);
 
             xmlDoc.Save(outputPath);
-            Logger.Success($"XML保存到：{outputPath}");
+            Logger.Success($"XML保存到：{outputPath}{Environment.NewLine}");
         }
 
         private static void AddChildNode(XmlDocument doc, XmlElement parent, string name, string value)
@@ -130,10 +128,11 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
         {
             if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
                 basePath += Path.DirectorySeparatorChar;
+            if (!targetPath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+                targetPath += Path.DirectorySeparatorChar;
 
             var baseUri = new Uri(basePath);
             var targetUri = new Uri(targetPath);
-
             var relativeUri = baseUri.MakeRelativeUri(targetUri);
 
             string relativePath = Uri.UnescapeDataString(relativeUri.ToString())
@@ -161,7 +160,7 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
 
 
             ManifestModel? oldManifest = String.IsNullOrEmpty(options.OldXmlPath) ? null : new ManifestModel(options.OldXmlPath);
-            ManifestModel newManifest = new ManifestModel(new Version(1,0,0),$"自动生成-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}");
+            ManifestModel newManifest = new ManifestModel(new Version(1, 0, 0), $"自动生成-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}");
 
             string[] allfiles = Directory.GetFiles(options.TargetDir, "*.*", SearchOption.AllDirectories);
 
@@ -215,11 +214,16 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
                         target2.Type = item.Type;
                         target2.Mode = item.Mode;
                         target2.KindOf = item.KindOf;
+                        continue;
                     }
                     #endregion
 
+                    #region 认为新版本无此文件
+                    Logger.Info($"存在例外文件：{item.Path} {item.FileName}{Environment.NewLine}");
+                    #endregion
+
                 }
-            
+
             SerializeManifestToXml(newManifest, options.NewXmlOutPutPath);
 
         }
