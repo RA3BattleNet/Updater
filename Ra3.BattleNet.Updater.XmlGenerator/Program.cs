@@ -178,7 +178,7 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
 
                 newManifest.Manifest.Files.Add(new ManifestFile(Guid.NewGuid(),
                     FileName,
-                    GetMD5(FullPath),
+                    BitConverter.ToString(GetMD5(FullPath)).Replace("-", "").ToLower(),
                     RelativePath,
                     (new Version(1, 0, 0)).ToString()));
             }

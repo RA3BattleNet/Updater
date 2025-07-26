@@ -4,6 +4,7 @@ using Ra3.BattleNet.Updater.Share.Utilities;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using System.Text.Json;
+using System.IO;
 
 namespace Ra3.BattleNet.Updater.Server
 {
@@ -78,7 +79,8 @@ namespace Ra3.BattleNet.Updater.Server
                     }
                     else
                     {
-                        string patchFileName = $"{newFile.UUID:N}.hdiff";
+                        //string patchFileName = $"{newFile.UUID:N}.hdiff";
+                        string patchFileName = $"{newFile.UUID:N}";
                         string patchFilePath = Path.Combine(outputPath, "files", patchFileName);
 
                         if (PatchGenerater.GeneratePatch(oldFilePath, newFilePath, patchFilePath))
@@ -167,9 +169,9 @@ namespace Ra3.BattleNet.Updater.Server
                         break;
 
                     case OperationTypeEnum.Patch:
-                        string patchDest = Path.Combine(filesDir, $"{op.File.UUID:N}.hdiff");
+                        string patchDest = Path.Combine(filesDir, $"{op.File.UUID:N}");
                         //File.Copy(op.PatchPath, patchDest, true);
-                        op.RelativePath = $"files/{op.File.UUID:N}.hdiff";
+                        op.RelativePath = $"files/{op.File.UUID:N}";
                         break;
 
                     case OperationTypeEnum.Move:

@@ -62,7 +62,7 @@ namespace Ra3.BattleNet.Updater.Client
                             }
 
                             // 验证MD5
-                            string newMd5 = PublicMethod.GetMD5(tempFile);
+                            string newMd5 = BitConverter.ToString(PublicMethod.GetMD5(tempFile)).Replace("-", "").ToLower();
                             if (newMd5 != operation.TargetMD5)
                             {
                                 throw new Exception($"MD5校验失败 (预期: {operation.TargetMD5}, 实际: {newMd5})");

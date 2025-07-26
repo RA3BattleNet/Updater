@@ -40,13 +40,14 @@ namespace Ra3.BattleNet.Updater.Share.Utilities
             return hpatch_path;
         }
 
-        public static string GetMD5(string path)
+        public static byte[] GetMD5(string path)
         {
             using (var md5 = MD5.Create())
             using (var stream = File.OpenRead(path))
             {
                 byte[] hashBytes = md5.ComputeHash(stream);
-                return BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
+                //return BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
+                return hashBytes;
             }
         }
     }
