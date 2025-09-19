@@ -1,9 +1,6 @@
 ﻿using Ra3.BattleNet.Updater.Share.Log;
-using Ra3.BattleNet.Updater.Share.Utilities;
 using System.ComponentModel.DataAnnotations;
-using System.Diagnostics;
 using System.Xml;
-using System.Xml.Linq;
 
 namespace Ra3.BattleNet.Updater.Share.Models
 {

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Ra3.BattleNet.Updater.Client.PatchIndexApplyer": {
+      "commandName": "Project",
+      "commandLineArgs": "--local-rootPath \"C:\\Users\\kt\\Downloads\\test\\server\\ori\\CoronaLauncher_Setup_3.11.9123.42797\" --local-manifestPath \"C:\\Users\\kt\\Downloads\\test\\server\\ori\\CoronaLauncher_Setup_3.11.9123.42797.xml\" --newest-manifestPath \"http://127.0.0.1:23456/manifest.xml\" --newest-patchesPath \"http://127.0.0.1:23456/patches.json\" --newest-downloadPath \"http://127.0.0.1:23456/download\""
+    }
+  }
+}

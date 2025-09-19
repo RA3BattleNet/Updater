@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Ra3.BattleNet.Updater.Share.Models
+﻿namespace Ra3.BattleNet.Updater.Share.Models
 {
     // 补丁操作模型
     public class PatchOperation
