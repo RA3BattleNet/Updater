@@ -1,4 +1,5 @@
-﻿using Ra3.BattleNet.Updater.Server.PatchIndexGenerator.EFCoreModels;
+﻿using Microsoft.EntityFrameworkCore;
+using Ra3.BattleNet.Updater.Server.PatchIndexGenerator.EFCoreModels;
 using Ra3.BattleNet.Updater.Share;
 using Ra3.BattleNet.Updater.Share.Log;
 using Ra3.BattleNet.Updater.Share.Models;
@@ -98,8 +99,7 @@ namespace Ra3.BattleNet.Updater.Server.PatchIndexGenerator
             ManifestModel manifest = new ManifestModel(options.ManifestPath);
 
             using var db = new UpdaterContext();
-
-            Logger.Debug($"数据库路径：{db.DbPath}\n");
+            db.Database.Migrate();
 
             var oriCount = db.PatchIndexes.Count();
 
@@ -150,9 +150,11 @@ namespace Ra3.BattleNet.Updater.Server.PatchIndexGenerator
                     .ToList();
 
                 bool hasCurrentVersion = history.Any(p => p.NewContentHash.SequenceEqual(newHash));
-
+                
                 if (!history.Any())
                 {
+                    if (file.FileName == "CoronaLauncher.exe")
+                        Logger.Debug($"首次添加文件 {file.FileName} ({file.UUID})，已写入数据库。\n");
                     // 第一次发现此文件，此时新旧HASH相同，且patchName为Guid.Empty,即（"00000000-0000-0000-0000-000000000000"）
                     db.PatchIndexes.Add(new PatchIndexModel
                     {
@@ -165,10 +167,11 @@ namespace Ra3.BattleNet.Updater.Server.PatchIndexGenerator
                         BuildVersion = (byte)file.Version.Build,
                         AddedDate = DateTimeOffset.UtcNow.DateTime,
                     });
-                    //Logger.Success($"首次添加文件 {file.FileName} ({file.UUID})，已写入数据库。\n");
                 }
                 else if (!hasCurrentVersion)
                 {
+                    if (file.FileName == "CoronaLauncher.exe")
+                        Logger.Debug($"已经存在过 {file.FileName} ({file.UUID})，已写入数据库。\n");
                     // 找到history中v1的MD5
                     PatchIndexModel? V1_V1_History = db.PatchIndexes.Where(p => p.FileGuid==fileGuidBytes)
                         .FirstOrDefault(p => p.OldContentHash == p.NewContentHash);

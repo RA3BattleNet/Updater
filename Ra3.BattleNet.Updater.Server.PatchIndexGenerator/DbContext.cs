@@ -20,9 +20,11 @@ namespace Ra3.BattleNet.Updater.Server.PatchIndexGenerator
         private const string DbName = "updater.db";
         public UpdaterContext()
         {
-            var folder = Environment.SpecialFolder.LocalApplicationData;
-            var path = Environment.GetFolderPath(folder);
-            DbPath = System.IO.Path.Join(path, DbName);
+            //var folder = Environment.SpecialFolder.LocalApplicationData;
+            //var path = Environment.GetFolderPath(folder);
+            //DbPath = System.IO.Path.Join(path, DbName);
+            var exePath = System.AppContext.BaseDirectory;
+            DbPath = System.IO.Path.Combine(exePath, DbName);
             Logger.Info($"数据库路径：{DbPath}\n");
         }
 
