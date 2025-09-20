@@ -2,6 +2,58 @@
 
 文件增量更新器
 
+## 使用流程说明
+
+本次以CoronaLauncher_Setup_3.11.9123.42797.exe和CoronaLauncher_Setup_3.12.9269.19502.exe的解包文件作为示例参考
+
+- 一些名词和参数说明：
+- [存放服务器不同版本的文件](\server\ori\)
+- [老版本](\server\ori\CoronaLauncher_Setup_3.11.9123.42797\)
+- [新版本](\server\ori\CoronaLauncher_Setup_3.12.9269.19502\)
+- [patch包存放](\server\patch\)
+- [客户端patch更新工具](\Updater\Ra3.BattleNet.Updater.Client.CLI/bin/Release/net8.0/Ra3.BattleNet.Updater.Client.CLI.exe)
+- [服务器patch生成工具](\Updater\Ra3.BattleNet.Updater.Server.CLI/bin/Release/net8.0/Ra3.BattleNet.Updater.Server.CLI.exe)
+- [xml页面文件生成](\Updater\Ra3.BattleNet.Updater.XmlGenerator/bin/Release/net8.0/Ra3.BattleNet.Updater.XmlGenerator.exe)
+- [patch页面文件生成](\Updater\Ra3.BattleNet.Updater.Server.PatchIndexGenerator/bin/Release/net8.0/Ra3.BattleNet.Updater.Server.PatchIndexGenerator.exe)
+
+### 服务端
+
+先给需要包含增量的版本生成对应xml文件标志，并将最新xml文件挂载在静态页面。
+
+> **注意任何非第一次的xml都需要使用上一个版本的xml作为依赖，否则会出现不认旧文件，进而无法自动生成patch的问题，具体示例如下**
+
+```bash
+Ra3.BattleNet.Updater.XmlGenerator.exe --target-dir .\server\ori\CoronaLauncher_Setup_3.11.9123.42797\ --new-xmloutputpath .\server\ori\CoronaLauncher_Setup_3.11.9123.42797.xml
+Ra3.BattleNet.Updater.XmlGenerator.exe --old-xmlpath .\server\ori\CoronaLauncher_Setup_3.12.9269.19502.xml --target-dir .\server\ori\CoronaLauncher_Setup_3.11.9123.42797\ --new-xmloutputpath .\server\ori\CoronaLauncher_Setup_3.11.9123.42797.xml
+
+cp .\server\ori\CoronaLauncher_Setup_3.12.9269.19502.xml /var/www/html/manifest.xml
+```
+
+此时的目录结构
+
+![](./images/image.png)
+
+然后需要手动在代码上初次创立sql文件
+
+```bash
+
+```
+
+
+
+随后需要给需要的版本直接打增量更新，注意命令执行顺序，软件会将相关文件与hash保存在sql数据库中，并维护成单文件版本链。始终是旧版本先执行，新版本最后执行。最后再将patch的特征信息文件patches.json部署在静态页面上
+
+```bash
+Ra3.BattleNet.Updater.Server.PatchIndexGenerator.exe --manifest .\server\ori\CoronaLauncher_Setup_3.11.9123.42797.xml --manifest-root .\server\ori\CoronaLauncher_Setup_3.11.9123.42797 --output .\server\patch\
+Ra3.BattleNet.Updater.Server.PatchIndexGenerator.exe --manifest .\server\ori\CoronaLauncher_Setup_3.12.9269.19502.xml --manifest-root .\server\ori\CoronaLauncher_Setup_3.12.9269.19502 --output .\server\patch\
+mv .\server\patch\patches.json /var/www/html/patches.json
+```
+
+![](./images/image-1.png)
+
+### 客户端
+
+
 ## 参考
 
 - https://github.com/RA3BattleNet/Metadata

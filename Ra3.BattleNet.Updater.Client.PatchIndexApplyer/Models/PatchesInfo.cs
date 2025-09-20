@@ -2,7 +2,6 @@
 
 namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer.Models
 {
-    // Patch信息类
     public class PatchInfo
     {
         [JsonProperty("UUID")]
@@ -15,71 +14,53 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer.Models
 
         [JsonProperty("OldMD5")]
         [JsonRequired]
-        public required Guid OldMD5 { get; set; }
+        public required string OldMD5 { get; set; }
 
         [JsonProperty("NewMD5")]
         [JsonRequired]
-        public required Guid NewMD5 { get; set; }
+        public required string NewMD5 { get; set; }
     }
 
-    // 补丁索引类，提供多种搜索方式
+    // 修正后的补丁索引类
     public class PatchIndex
     {
         private readonly List<PatchInfo> _allPatches;
-        private readonly Dictionary<Guid, PatchInfo> _byUuid;
-        private readonly Dictionary<Guid, PatchInfo> _byPatchName;
-        private readonly Dictionary<Guid, PatchInfo> _byOldMd5;
-        private readonly Dictionary<Guid, PatchInfo> _byNewMd5;
+
+        private readonly Dictionary<string, PatchInfo> _patchByKey;
 
         public PatchIndex(string jsonContent)
         {
             // 反序列化JSON
             _allPatches = JsonConvert.DeserializeObject<List<PatchInfo>>(jsonContent);
 
-            // 构建索引
-            _byUuid = new Dictionary<Guid, PatchInfo>();
-            _byPatchName = new Dictionary<Guid, PatchInfo>();
-            _byOldMd5 = new Dictionary<Guid, PatchInfo>();
-            _byNewMd5 = new Dictionary<Guid, PatchInfo>();
-
+            // 构建复合键索引
+            _patchByKey = new Dictionary<string, PatchInfo>();
             foreach (var patch in _allPatches)
             {
-                _byUuid[patch.UUID] = patch;
-                _byPatchName[patch.PatchName] = patch;
-                _byOldMd5[patch.OldMD5] = patch;
-                _byNewMd5[patch.NewMD5] = patch;
+                string key = $"{patch.UUID.ToString("N")}|{patch.OldMD5}|{patch.NewMD5}";
+                _patchByKey[key] = patch;
             }
         }
 
-        // 通过UUID查找补丁
-        public PatchInfo FindByUuid(Guid uuid)
+        /// <summary>
+        /// 根据文件UUID、旧MD5和新MD5查找适用的补丁
+        /// </summary>
+        /// <param name="uuid">文件UUID</param>
+        /// <param name="oldMd5">旧文件MD5</param>
+        /// <param name="newMd5">新文件MD5</param>
+        /// <returns>找到的补丁信息，如果找不到则返回null</returns>
+        public Guid? FindPatch(Guid uuid, string oldMd5, string newMd5)
         {
-            return _byUuid.TryGetValue(uuid, out var patch) ? patch : null;
+            string key = $"{uuid.ToString("N")}|{oldMd5}|{newMd5}";
+            return _patchByKey.TryGetValue(key, out var patch) ? patch.PatchName : null;
         }
 
-        // 通过补丁名称查找
-        public PatchInfo FindByPatchName(Guid patchName)
-        {
-            return _byPatchName.TryGetValue(patchName, out var patch) ? patch : null;
-        }
-
-        // 通过旧文件MD5查找
-        public PatchInfo FindByOldMd5(Guid oldMd5)
-        {
-            return _byOldMd5.TryGetValue(oldMd5, out var patch) ? patch : null;
-        }
-
-        // 通过新文件MD5查找
-        public PatchInfo FindByNewMd5(Guid newMd5)
-        {
-            return _byNewMd5.TryGetValue(newMd5, out var patch) ? patch : null;
-        }
-
-        // 获取所有补丁
+        /// <summary>
+        /// 获取所有补丁记录
+        /// </summary>
         public IReadOnlyList<PatchInfo> GetAllPatches()
         {
             return _allPatches.AsReadOnly();
         }
     }
-
 }
