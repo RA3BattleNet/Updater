@@ -2,7 +2,7 @@
   "profiles": {
     "Ra3.BattleNet.Updater.Server.PatchIndexGenerator": {
       "commandName": "Project",
-      "commandLineArgs": "--manifest C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.12.9269.19502.xml --manifest-root C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.12.9269.19502 --output C:\\Users\\kt\\Downloads\\test\\html --debug",
+      "commandLineArgs": "--manifest C:\\Users\\kt\\Downloads\\test\\server\\ori\\CoronaLauncher_Setup_3.12.9269.19502.xml --manifest-root C:\\Users\\kt\\Downloads\\test\\server\\ori\\CoronaLauncher_Setup_3.12.9269.19502 --output C:\\Users\\kt\\Downloads\\test\\server\\patch\\ --debug",
       "environmentVariables": {
         "old": "--manifest C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.11.9123.42797.xml --manifest-root C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.11.9123.42797 --output C:\\Users\\kt\\Downloads\\test\\html --debug",
         "new": "--manifest C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.12.9269.19502.xml --manifest-root C:\\Users\\kt\\Downloads\\test\\CoronaLauncher_Setup_3.12.9269.19502 --output C:\\Users\\kt\\Downloads\\test\\html --debug"

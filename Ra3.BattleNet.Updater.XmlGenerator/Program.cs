@@ -1,16 +1,7 @@
-﻿using System.Xml;
-using Ra3.BattleNet.Updater.Share.Log;
+﻿using Ra3.BattleNet.Updater.Share.Log;
 using static Ra3.BattleNet.Updater.Share.Utilities.PublicMethod;
 using Ra3.BattleNet.Updater.Share.Models;
-using System.Globalization;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.Security.Cryptography;
-using System.Text;
-using System.Xml.Linq;
-using System.ComponentModel.DataAnnotations;
 namespace Ra3.BattleNet.Updater.XmlGenerator
 {
     internal class CommandLineOptions
@@ -78,52 +69,6 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
 
     internal class Program
     {
-        public static void SerializeManifestToXml(ManifestModel model, string outputPath)
-        {
-            XmlDocument xmlDoc = new XmlDocument();
-            XmlDeclaration declaration = xmlDoc.CreateXmlDeclaration("1.0", "UTF-8", null);
-            xmlDoc.AppendChild(declaration);
-
-            XmlElement metadataNode = xmlDoc.CreateElement("Metadata");
-            metadataNode.SetAttribute("Version", model.Version.ToString());
-            xmlDoc.AppendChild(metadataNode);
-
-            XmlElement tagsNode = xmlDoc.CreateElement("Tags");
-            AddChildNode(xmlDoc, tagsNode, "UUID", model.Tags.UUID.ToString("N"));
-            AddChildNode(xmlDoc, tagsNode, "GenTime", model.Tags.GenTime.ToUnixTimeSeconds().ToString());
-            AddChildNode(xmlDoc, tagsNode, "Commit", model.Tags.Commit);
-            metadataNode.AppendChild(tagsNode);
-
-            XmlElement includesNode = xmlDoc.CreateElement("Includes");
-            metadataNode.AppendChild(includesNode);
-
-            XmlElement manifestNode = xmlDoc.CreateElement("Manifest");
-            foreach (ManifestFile file in model.Manifest.Files)
-            {
-                XmlElement fileNode = xmlDoc.CreateElement("File");
-                AddChildNode(xmlDoc, fileNode, "UUID", file.UUID.ToString("N"));
-                AddChildNode(xmlDoc, fileNode, "FileName", file.FileName);
-                AddChildNode(xmlDoc, fileNode, "MD5", file.MD5);
-                AddChildNode(xmlDoc, fileNode, "Path", file.Path);
-                AddChildNode(xmlDoc, fileNode, "Version", file.Version.ToString());
-                AddChildNode(xmlDoc, fileNode, "Type", file.Type.ToString());
-                AddChildNode(xmlDoc, fileNode, "Mode", file.Mode.ToString());
-                AddChildNode(xmlDoc, fileNode, "KindOf", file.KindOf);
-                manifestNode.AppendChild(fileNode);
-            }
-            metadataNode.AppendChild(manifestNode);
-
-            xmlDoc.Save(outputPath);
-            Logger.Success($"XML保存到：{outputPath}{Environment.NewLine}");
-        }
-
-        private static void AddChildNode(XmlDocument doc, XmlElement parent, string name, string value)
-        {
-            XmlElement node = doc.CreateElement(name);
-            node.InnerText = value;
-            parent.AppendChild(node);
-        }
-
         private static string GetRelativePath(string basePath, string targetPath)
         {
             if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
@@ -157,7 +102,8 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
 #endif
             CommandLineOptions options = new CommandLineOptions();
             options.Parse(args);
-
+            Debug.Assert(!String.IsNullOrEmpty(options.NewXmlOutPutPath));
+            Debug.Assert(!String.IsNullOrEmpty(options.TargetDir));
 
             ManifestModel? oldManifest = String.IsNullOrEmpty(options.OldXmlPath) ? null : new ManifestModel(options.OldXmlPath);
             ManifestModel newManifest = new ManifestModel(new Version(1, 0, 0), $"自动生成-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}");
@@ -223,8 +169,8 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
                     #endregion
 
                 }
-
-            SerializeManifestToXml(newManifest, options.NewXmlOutPutPath);
+            
+            newManifest.SaveToXml(options.NewXmlOutPutPath);
 
         }
 

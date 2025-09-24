@@ -12,13 +12,22 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
     {
         internal class CommandLineOptions
         {
-            internal object options;
-
             public string? localRootPath { get; set; }
             public string? localManifestPath { get; set; }
             public string? NewestManifestPath { get; set; }
             public string? NewestPatchesPath { get; set; }
             public string? NewestDownloadPath { get; set; }
+
+            public void ShowUsage()
+            {
+                Console.Write("使用方式:\n");
+                Console.Write("--local-rootPath <本地待更新文件夹路径>\n" +
+                    "--local-manifestPath <本地manifest文件路径>\n" +
+                    "--newest-manifestPath <最新的manifest文件路径或URL>\n" +
+                    "--newest-patchesPath <最新的patches文件路径或URL>\n" +
+                    "--newest-downloadPath <最新的download文件路径或URL>\n" +
+                    "--debug  输出更多日志\n");
+            }
         }
 
         internal static class CommandLineParser
@@ -59,7 +68,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                         string.IsNullOrEmpty(options.NewestManifestPath))
                     {
                         Logger.Fail("缺少必要参数\n");
-                        ShowUsage();
+                        options.ShowUsage();
                         Environment.Exit(-1);
                     }
                     return options;
@@ -67,29 +76,23 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 catch (Exception ex)
                 {
                     Logger.Fail($"参数无法解析{Environment.NewLine}Msg:{ex.Message}");
-                    ShowUsage();
+                    options.ShowUsage();
                     Environment.Exit(-2);
                 }
                 return options;
             }
-
-            public static void ShowUsage()
-            {
-                Console.Write("使用方式:\n");
-                Console.Write("--local-rootPath <本地待更新文件夹路径>\n" +
-                    "--local-manifestPath <本地manifest文件路径>\n" +
-                    "--newest-manifestPath <最新的manifest文件路径或URL>\n" +
-                    "--newest-patchesPath <最新的patches文件路径或URL>\n" +
-                    "--newest-downloadPath <最新的download文件路径或URL>\n" +
-                    "--debug  输出更多日志\n");
-            }
         }
 
         private static readonly string _cachePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "UpdaterCache");
-        private static CommandLineOptions options = new CommandLineOptions();
+        private static CommandLineOptions _options = new CommandLineOptions();
 
         static async Task Main(string[] args)
         {
+            if (args.Contains("--help"))
+            {
+                _options.ShowUsage();
+                Environment.Exit(-1);
+            }
 #if DEBUG
             Logger.IsDebug = true;
 #else
@@ -99,7 +102,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
             Logger.Info("Client Updater Starting\n");
             Logger.Debug($"args: {string.Join(" ", args)}{Environment.NewLine}");
 
-            options = CommandLineParser.Parse(args);
+            _options = CommandLineParser.Parse(args);
 
             ForceCleanCacheDirectory(); // 清理cache文件夹并存留警告文件
 
@@ -107,18 +110,18 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
             // 若不同则会尝试读取patches以找到所需文件的patch信息
             // 若有记录则下载patch并补丁，如果无记录则直接下载文件
 
-            Debug.Assert(options.localRootPath != null);
-            Debug.Assert(Path.Exists(options.localRootPath));
-            Debug.Assert(options.localManifestPath != null);
-            Debug.Assert(File.Exists(options.localManifestPath));
+            Debug.Assert(_options.localRootPath != null);
+            Debug.Assert(Path.Exists(_options.localRootPath));
+            Debug.Assert(_options.localManifestPath != null);
+            Debug.Assert(File.Exists(_options.localManifestPath));
 
-            Debug.Assert(options.NewestManifestPath != null);
-            Debug.Assert(options.NewestPatchesPath != null);
-            Debug.Assert(options.NewestDownloadPath != null);
+            Debug.Assert(_options.NewestManifestPath != null);
+            Debug.Assert(_options.NewestPatchesPath != null);
+            Debug.Assert(_options.NewestDownloadPath != null);
             try
             {
                 //获取最新manifest
-                ManifestModel newestManifest = new ManifestModel(options.NewestManifestPath);
+                ManifestModel newestManifest = new ManifestModel(_options.NewestManifestPath);
                 if (newestManifest == null)
                 {
                     Logger.Fail("最新Manifest获取失败\n");
@@ -130,7 +133,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 Logger.Success("最新Manifest已读取\n");
 
                 //获取本地manifest
-                ManifestModel localManifest = new ManifestModel(options.localManifestPath);
+                ManifestModel localManifest = new ManifestModel(_options.localManifestPath);
                 if (newestManifest == null)
                 {
                     Logger.Fail("本地Manifest获取失败\n");
@@ -150,7 +153,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 }
                 Logger.Info($"发现新版本：{nuuid}（当前版本：{luuid}），开始尝试增量更新\n");
 
-                string patchesStr = await LoadJsonAsync(options.NewestPatchesPath);
+                string patchesStr = await LoadJsonAsync(_options.NewestPatchesPath);
                 if (string.IsNullOrEmpty(patchesStr))
                 {
                     Logger.Fail("无法获取patches.json文件内容\n");
@@ -174,133 +177,19 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
 
                     // 计算本地文件的MD5（如果存在）
                     string localMd5 = null;
-                    string localFilePath = System.IO.Path.Combine(options.localRootPath, localFile?.Path.TrimStart('/', '\\') ?? "", localFile?.FileName ?? "");
-                    if (localFile != null && File.Exists(localFilePath))
+                    string localFilePath = System.IO.Path.Combine(_options.localRootPath, localFile?.Path.TrimStart('/', '\\') ?? "", localFile?.FileName ?? "");
+
+                    if (localFile == null)
                     {
-                        using (var md5 = System.Security.Cryptography.MD5.Create())
-                        {
-                            using (var stream = File.OpenRead(localFilePath))
-                            {
-                                var hash = md5.ComputeHash(stream);
-                                localMd5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-                            }
-                        }
-                    }
-
-                    // 已经最新
-                    if (localMd5 == newFile.MD5)
-                    {
-                        Logger.Debug($"文件 {newFile.FileName} 已是最新，跳过更新\n");
-                        continue;
-                    }
-                    Logger.Info($"文件 {newFile.FileName} 正在更新\n");
-
-                    // 尝试查找补丁
-                    Guid? applicablePatchGuidFlag = new Guid();
-                    if (localFile != null && !string.IsNullOrEmpty(localMd5))
-                    {
-                        // 使用文件UUID、旧MD5和新MD5查找补丁文件（有且最多只会找到一个）
-                        applicablePatchGuidFlag = patchesContent.FindPatch(localFile.UUID, localMd5, newFile.MD5);
-                    }
-
-                    // 确保目标目录存在
-
-                    // 旧文件目录路径
-                    string localTargetDir = System.IO.Path.Combine(options.localRootPath, localFile.Path.TrimStart('/', '\\'));
-                    Logger.Debug($"旧文件目录路径: {localTargetDir}\n");
-                    if (!Directory.Exists(localTargetDir))
-                    {
-                        Directory.CreateDirectory(localTargetDir);
-                    }
-                    // 旧文件路径
-                    string localTargetFilePath = System.IO.Path.Combine(localTargetDir, localFile.FileName.TrimStart('/', '\\'));
-                    Logger.Debug($"旧文件路径: {localTargetFilePath}\n");
-
-                    // 新文件目录路径
-                    string newestTargetDir = System.IO.Path.Combine(options.localRootPath, newFile.Path.TrimStart('/', '\\'));
-                    Logger.Debug($"新文件目录路径: {newestTargetDir}\n");
-                    if (!Directory.Exists(newestTargetDir))
-                    {
-                        Directory.CreateDirectory(newestTargetDir);
-                    }
-                    // 新文件路径
-                    string newestTargetFilePath = System.IO.Path.Combine(newestTargetDir, localFile.FileName.TrimStart('/', '\\'));
-                    Logger.Debug($"新文件路径: {newestTargetFilePath}\n");
-
-                    Debug.Assert(!String.IsNullOrEmpty(localTargetDir));
-                    Debug.Assert(!String.IsNullOrEmpty(localTargetFilePath));
-                    Debug.Assert(!String.IsNullOrEmpty(newestTargetDir));
-                    Debug.Assert(!String.IsNullOrEmpty(newestTargetFilePath));
-
-                    if (applicablePatchGuidFlag != null)
-                    {
-                        Guid PatchNameGuid = applicablePatchGuidFlag.Value;
-                        // 尝试使用补丁更新
-                        Logger.Info($"找到适用补丁，尝试使用增量更新，下载文件：{PatchNameGuid.ToString("N")}\n");
-
-                        try
-                        {
-                            if (!await DownloadFileAsync(DownloadType.patches, PatchNameGuid))
-                            {
-                                Logger.Fail($"下载失败，目标信息：{PatchNameGuid}");
-                                throw new Exception("补丁下载失败");
-                            }
-                            string DiffFilePath = Path.Combine(_cachePath, PatchNameGuid.ToString("N"));
-                            // 应用补丁
-                            bool success = PatchApplyer.ApplyPatch(localTargetFilePath, DiffFilePath, newestTargetFilePath);
-
-                            if (success)
-                            {
-                                // 验证新文件的MD5
-                                string newFileMd5;
-                                using (var md5 = System.Security.Cryptography.MD5.Create())
-                                {
-                                    using (var stream = File.OpenRead(newestTargetFilePath))
-                                    {
-                                        var hash = md5.ComputeHash(stream);
-                                        newFileMd5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-                                    }
-                                }
-
-                                if (newFileMd5 == newFile.MD5)
-                                {
-                                    Logger.Info($"文件 {newFile.FileName} 增量更新成功\n");
-                                }
-                                else
-                                {
-                                    Logger.Warning($"文件 {newFile.FileName} 补丁应用后MD5验证失败，将尝试完整下载\n");
-                                    Debug.Assert(false, "不应该遇到此种情况");
-                                    applicablePatchGuidFlag = null; // 触发完整下载
-                                }
-                            }
-                            else
-                            {
-                                Logger.Warning($"文件 {newFile.FileName} 补丁应用失败，将尝试完整下载\n");
-                                applicablePatchGuidFlag = null; // 触发完整下载
-                            }
-
-                            // 清理临时文件
-                            if (localTargetFilePath != newestTargetFilePath)
-                                File.Delete(localTargetFilePath);
-                            //File.Delete(DiffFilePath);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Warning($"文件 {newFile.FileName} 补丁更新过程出错: {ex.Message}，将尝试完整下载\n");
-                            applicablePatchGuidFlag = null; // 触发完整下载
-                        }
-                    }
-
-                    // 如果没有适用补丁，下载完整文件
-                    if (applicablePatchGuidFlag == null)
-                    {
-                        Logger.Info($"未找到适用补丁，将下载完整文件: {newFile.FileName}\n");
-                        string DownloadedNewestFilePath = Path.Combine(_cachePath, newFile.UUID.ToString("N"));
+                        // 新文件，直接下载完整文件
+                        Logger.Info($"本地不存在新文件 {newFile.FileName}，将直接下载完整文件\n");
+                        string DownloadedNewestFilePath = Path.Combine(_cachePath, newFile.MD5);
+                        string newestTargetFilePath = System.IO.Path.Combine(_options.localRootPath, newFile.Path.TrimStart('/', '\\'), newFile.FileName.TrimStart('/', '\\'));
 
                         try
                         {
                             // 下载完整文件
-                            await DownloadFileAsync(DownloadType.files, newFile.UUID);
+                            await DownloadFileAsync(DownloadType.files, newFile.MD5);
 
                             // 验证文件MD5
                             string downloadedMd5;
@@ -316,7 +205,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                             if (downloadedMd5 == newFile.MD5)
                             {
                                 // 确保目录存在
-                                Directory.CreateDirectory(newestTargetDir);
+                                Directory.CreateDirectory(Path.GetDirectoryName(newestTargetFilePath));
 
                                 // 移动文件到目标位置
                                 File.Copy(DownloadedNewestFilePath, newestTargetFilePath, true);
@@ -328,15 +217,179 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                                 NewestFlag = false;
                             }
 
-                            // 清理临时文件
-                            if (localTargetFilePath != newestTargetFilePath)
-                                File.Delete(localTargetFilePath);
                             //File.Delete(DownloadedNewestFilePath);
                         }
                         catch (Exception ex)
                         {
                             Logger.Fail($"文件 {newFile.FileName} 下载失败: {ex.Message}\n");
                             NewestFlag = false;
+                        }
+                    }
+                    else
+                    {
+                        if (localFile != null && File.Exists(localFilePath))
+                        {
+                            using (var md5 = System.Security.Cryptography.MD5.Create())
+                            {
+                                using (var stream = File.OpenRead(localFilePath))
+                                {
+                                    var hash = md5.ComputeHash(stream);
+                                    localMd5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                }
+                            }
+                        }
+
+                        // 已经最新
+                        if (localMd5 == newFile.MD5)
+                        {
+                            Logger.Debug($"文件 {newFile.FileName} 已是最新，跳过更新\n");
+                            continue;
+                        }
+                        Logger.Info($"文件 {newFile.FileName} 正在更新\n");
+
+                        // 尝试查找补丁
+                        Guid? applicablePatchGuidFlag = new Guid();
+                        if (localFile != null && !string.IsNullOrEmpty(localMd5))
+                        {
+                            // 使用文件UUID、旧MD5和新MD5查找补丁文件（有且最多只会找到一个）
+                            applicablePatchGuidFlag = patchesContent.FindPatch(localFile.UUID, localMd5, newFile.MD5);
+                        }
+
+                        // 确保目标目录存在
+
+                        // 旧文件目录路径
+                        string localTargetDir = System.IO.Path.Combine(_options.localRootPath, localFile.Path.TrimStart('/', '\\'));
+                        Logger.Debug($"旧文件目录路径: {localTargetDir}\n");
+                        if (!Directory.Exists(localTargetDir))
+                        {
+                            Directory.CreateDirectory(localTargetDir);
+                        }
+                        // 旧文件路径
+                        string localTargetFilePath = System.IO.Path.Combine(localTargetDir, localFile.FileName.TrimStart('/', '\\'));
+                        Logger.Debug($"旧文件路径: {localTargetFilePath}\n");
+
+                        // 新文件目录路径
+                        string newestTargetDir = System.IO.Path.Combine(_options.localRootPath, newFile.Path.TrimStart('/', '\\'));
+                        Logger.Debug($"新文件目录路径: {newestTargetDir}\n");
+                        if (!Directory.Exists(newestTargetDir))
+                        {
+                            Directory.CreateDirectory(newestTargetDir);
+                        }
+                        // 新文件路径
+                        string newestTargetFilePath = System.IO.Path.Combine(newestTargetDir, newFile.FileName.TrimStart('/', '\\'));
+                        Logger.Debug($"新文件路径: {newestTargetFilePath}\n");
+
+                        Debug.Assert(!String.IsNullOrEmpty(localTargetDir));
+                        Debug.Assert(!String.IsNullOrEmpty(localTargetFilePath));
+                        Debug.Assert(!String.IsNullOrEmpty(newestTargetDir));
+                        Debug.Assert(!String.IsNullOrEmpty(newestTargetFilePath));
+
+                        if (applicablePatchGuidFlag != null)
+                        {
+                            Guid PatchNameGuid = applicablePatchGuidFlag.Value;
+                            // 尝试使用补丁更新
+                            Logger.Info($"找到适用补丁，尝试使用增量更新，下载文件：{PatchNameGuid.ToString("N")}\n");
+
+                            try
+                            {
+                                if (!await DownloadFileAsync(DownloadType.patches, PatchNameGuid.ToString("N")))
+                                {
+                                    Logger.Fail($"下载失败，目标信息：{PatchNameGuid}");
+                                    throw new Exception("补丁下载失败");
+                                }
+                                string DiffFilePath = Path.Combine(_cachePath, PatchNameGuid.ToString("N"));
+                                // 应用补丁
+                                bool success = PatchApplyer.ApplyPatch(localTargetFilePath, DiffFilePath, newestTargetFilePath);
+
+                                if (success)
+                                {
+                                    // 验证新文件的MD5
+                                    string newFileMd5;
+                                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                                    {
+                                        using (var stream = File.OpenRead(newestTargetFilePath))
+                                        {
+                                            var hash = md5.ComputeHash(stream);
+                                            newFileMd5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                        }
+                                    }
+
+                                    if (newFileMd5 == newFile.MD5)
+                                    {
+                                        Logger.Info($"文件 {newFile.FileName} 增量更新成功\n");
+                                    }
+                                    else
+                                    {
+                                        Logger.Warning($"文件 {newFile.FileName} 补丁应用后MD5验证失败，将尝试完整下载\n");
+                                        Debug.Assert(false, "不应该遇到此种情况");
+                                        applicablePatchGuidFlag = null; // 触发完整下载
+                                    }
+                                }
+                                else
+                                {
+                                    Logger.Warning($"文件 {newFile.FileName} 补丁应用失败，将尝试完整下载\n");
+                                    applicablePatchGuidFlag = null; // 触发完整下载
+                                }
+
+                                // 清理临时文件
+                                if (localTargetFilePath != newestTargetFilePath)
+                                    File.Delete(localTargetFilePath);
+                                //File.Delete(DiffFilePath);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warning($"文件 {newFile.FileName} 补丁更新过程出错: {ex.Message}，将尝试完整下载\n");
+                                applicablePatchGuidFlag = null; // 触发完整下载
+                            }
+                        }
+
+                        // 如果没有适用补丁，下载完整文件
+                        if (applicablePatchGuidFlag == null)
+                        {
+                            Logger.Info($"未找到适用补丁，将下载完整文件: {newFile.FileName}\n");
+                            string DownloadedNewestFilePath = Path.Combine(_cachePath, newFile.MD5);
+
+                            try
+                            {
+                                // 下载完整文件
+                                await DownloadFileAsync(DownloadType.files, newFile.MD5);
+
+                                // 验证文件MD5
+                                string downloadedMd5;
+                                using (var md5 = System.Security.Cryptography.MD5.Create())
+                                {
+                                    using (var stream = File.OpenRead(DownloadedNewestFilePath))
+                                    {
+                                        var hash = md5.ComputeHash(stream);
+                                        downloadedMd5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                    }
+                                }
+
+                                if (downloadedMd5 == newFile.MD5)
+                                {
+                                    // 确保目录存在
+                                    Directory.CreateDirectory(newestTargetDir);
+
+                                    // 移动文件到目标位置
+                                    File.Copy(DownloadedNewestFilePath, newestTargetFilePath, true);
+                                    Logger.Info($"文件 {newFile.FileName} 完整下载成功\n");
+                                }
+                                else
+                                {
+                                    Logger.Fail($"文件 {newFile.FileName} 下载后MD5验证失败\n");
+                                    NewestFlag = false;
+                                }
+
+                                // 清理临时文件
+                                if (localTargetFilePath != newestTargetFilePath)
+                                    File.Delete(localTargetFilePath);
+                                //File.Delete(DownloadedNewestFilePath);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Fail($"文件 {newFile.FileName} 下载失败: {ex.Message}\n");
+                                NewestFlag = false;
+                            }
                         }
                     }
 
@@ -353,8 +406,9 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                     // 保存更新后的本地manifest
                     try
                     {
-                        //localManifest.Save(options.localManifestPath);
-                        Logger.Info("本地manifest已更新\n");
+                        newestManifest.SaveToXml(_options.localManifestPath);
+                        //File.Copy(_options.NewestManifestPath, _options.localManifestPath, true);
+                        Logger.Success("本地manifest已最新\n");
                     }
                     catch (Exception ex)
                     {
@@ -362,11 +416,22 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                     }
                     localManifest.Tags.UUID = newestManifest.Tags.UUID;
                     Logger.Success("所有文件均已成功更新到最新版本\n");
-                    Logger.Info("更新完成");
+                    Logger.Success("更新完成\n");
                 }
                 else
                 {
-                    Logger.Fail("部分文件未能成功更新到最新版本，请再次重试更新\n");
+                    try
+                    {
+                        localManifest.SaveToXml(_options.localManifestPath);
+                        //File.Copy(_options.NewestManifestPath, _options.localManifestPath, true);
+                        Logger.Info("manifest已部分更新\n");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Fail($"保存本地manifest失败: {ex.Message}\n");
+                    }
+                    Logger.Warning("更新未完成\n");
+
                 }
 
                 Logger.Success("更新程序执行完毕\n");
@@ -384,19 +449,19 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
             files
         }
 
-        public static async Task<bool> DownloadFileAsync(DownloadType downloadType, Guid FileNameGuid)
+        public static async Task<bool> DownloadFileAsync(DownloadType downloadType, String FileName)
         {
             using (HttpClient client = new HttpClient())
             {
                 try
                 {
                     // 构建下载URL，确保URL的正确格式
-                    string baseUrl = options.NewestDownloadPath.TrimEnd('/');
-                    string FullDownloadUrl = $"{baseUrl}/{downloadType.ToString()}/{FileNameGuid.ToString("N")}";
+                    string baseUrl = _options.NewestDownloadPath.TrimEnd('/');
+                    string FullDownloadUrl = $"{baseUrl}/{downloadType.ToString()}/{FileName}";
                     using (var response = await client.GetAsync(FullDownloadUrl))
                     {
                         response.EnsureSuccessStatusCode();
-                        string DiffFilePath = Path.Combine(_cachePath, FileNameGuid.ToString("N"));
+                        string DiffFilePath = Path.Combine(_cachePath, FileName);
                         using (var fs = new FileStream(DiffFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
                         {
                             await response.Content.CopyToAsync(fs);
@@ -406,7 +471,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 }
                 catch (Exception ex)
                 {
-                    Logger.Fail($"{downloadType.ToString()}方式下载文件失败: {FileNameGuid}, 错误: {ex.Message}");
+                    Logger.Fail($"{downloadType.ToString()}方式下载文件失败: {FileName}, 错误: {ex.Message}");
                     return false;
                 }
             }

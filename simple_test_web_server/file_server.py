@@ -19,7 +19,18 @@ def secure_path(base_dir, filename):
 app = Flask(__name__)
 
 # 配置文件路径
-XML_FILE_PATH = r'C:\Users\kt\Downloads\test\server\ori\CoronaLauncher_Setup_3.12.9269.19502.xml'
+
+# XML_FILE_PATH = r'C:\Users\kt\Downloads\test\server\ori\CoronaLauncher_Setup_3.12.9269.19502.xml'
+# JSON_FILE_PATH = r'C:\Users\kt\Downloads\test\server\patch\patches.json'
+# DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch'
+# FILES_DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch\files'
+# PATCHES_DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch\patches'
+# # Path(DOWNLOAD_DIR).mkdir(exist_ok=True)
+# # Path(FILES_DOWNLOAD_DIR).mkdir(exist_ok=True)
+# # Path(PATCHES_DOWNLOAD_DIR).mkdir(exist_ok=True)
+
+
+XML_FILE_PATH = r'C:\Users\kt\Downloads\test\server\ori\CoronaLauncher_Setup_3.12.9381.2215.xml'
 JSON_FILE_PATH = r'C:\Users\kt\Downloads\test\server\patch\patches.json'
 DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch'
 FILES_DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch\files'

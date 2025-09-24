@@ -1,5 +1,6 @@
 ﻿using Ra3.BattleNet.Updater.Share.Log;
 using System.ComponentModel.DataAnnotations;
+using System.Reflection;
 using System.Xml;
 
 namespace Ra3.BattleNet.Updater.Share.Models
@@ -135,10 +136,58 @@ namespace Ra3.BattleNet.Updater.Share.Models
             _includes = new Includes();
             _manifest = new Manifest(MNode.SelectSingleNode("Manifest"));
         }
+
+        // SerializeManifestToXml
+        public void SaveToXml(string outputPath)
+        {
+            XmlDocument xmlDoc = new XmlDocument();
+            XmlDeclaration declaration = xmlDoc.CreateXmlDeclaration("1.0", "UTF-8", null);
+            xmlDoc.AppendChild(declaration);
+
+            XmlElement metadataNode = xmlDoc.CreateElement("Metadata");
+            metadataNode.SetAttribute("Version", this.Version.ToString());
+            xmlDoc.AppendChild(metadataNode);
+
+            XmlElement tagsNode = xmlDoc.CreateElement("Tags");
+            AddChildNode(xmlDoc, tagsNode, "UUID", this.Tags.UUID.ToString("N"));
+            AddChildNode(xmlDoc, tagsNode, "GenTime", this.Tags.GenTime.ToUnixTimeSeconds().ToString());
+            AddChildNode(xmlDoc, tagsNode, "Commit", this.Tags.Commit);
+            metadataNode.AppendChild(tagsNode);
+
+            XmlElement includesNode = xmlDoc.CreateElement("Includes");
+            metadataNode.AppendChild(includesNode);
+
+            XmlElement manifestNode = xmlDoc.CreateElement("Manifest");
+            foreach (ManifestFile file in this.Manifest.Files)
+            {
+                XmlElement fileNode = xmlDoc.CreateElement("File");
+                AddChildNode(xmlDoc, fileNode, "UUID", file.UUID.ToString("N"));
+                AddChildNode(xmlDoc, fileNode, "FileName", file.FileName);
+                AddChildNode(xmlDoc, fileNode, "MD5", file.MD5);
+                AddChildNode(xmlDoc, fileNode, "Path", file.Path);
+                AddChildNode(xmlDoc, fileNode, "Version", file.Version.ToString());
+                AddChildNode(xmlDoc, fileNode, "Type", file.Type.ToString());
+                AddChildNode(xmlDoc, fileNode, "Mode", file.Mode.ToString());
+                AddChildNode(xmlDoc, fileNode, "KindOf", file.KindOf);
+                manifestNode.AppendChild(fileNode);
+            }
+            metadataNode.AppendChild(manifestNode);
+
+            xmlDoc.Save(outputPath);
+            Logger.Success($"XML保存到：{outputPath}{Environment.NewLine}");
+        }
+
+        private static void AddChildNode(XmlDocument doc, XmlElement parent, string name, string value)
+        {
+            XmlElement node = doc.CreateElement(name);
+            node.InnerText = value;
+            parent.AppendChild(node);
+        }
+
     }
 
 
-    
+
 
     /// <summary>
     /// 标签信息
@@ -257,7 +306,8 @@ namespace Ra3.BattleNet.Updater.Share.Models
             //    {
             //    }
             //}
-        }
+            
+    }
     }
 
 
