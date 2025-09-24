@@ -288,7 +288,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                         {
                             Guid PatchNameGuid = applicablePatchGuidFlag.Value;
                             // 尝试使用补丁更新
-                            Logger.Info($"找到适用补丁，尝试使用增量更新，下载文件：{PatchNameGuid.ToString("N")}\n");
+                            Logger.Note($"找到适用补丁，尝试使用增量更新，下载文件：{PatchNameGuid.ToString("N")}\n");
 
                             try
                             {
@@ -321,7 +321,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                                     else
                                     {
                                         Logger.Warning($"文件 {newFile.FileName} 补丁应用后MD5验证失败，将尝试完整下载\n");
-                                        Debug.Assert(false, "不应该遇到此种情况");
+                                        Debug.Assert(false, "此代码不应遇到，此种情况证明发生了意料之外的逻辑故障");
                                         applicablePatchGuidFlag = null; // 触发完整下载
                                     }
                                 }
