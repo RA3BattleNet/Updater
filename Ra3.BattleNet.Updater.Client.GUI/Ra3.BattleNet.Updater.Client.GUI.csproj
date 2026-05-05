@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ra3.BattleNet.Updater.Client\Ra3.BattleNet.Updater.Client.csproj" />
+    <ProjectReference Include="..\Ra3.BattleNet.Updater.Client.PatchIndexApplyer\Ra3.BattleNet.Updater.Client.PatchIndexApplyer.csproj" />
   </ItemGroup>
 
 </Project>
