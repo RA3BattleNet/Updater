@@ -17,6 +17,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
             public string? NewestManifestPath { get; set; }
             public string? NewestPatchesPath { get; set; }
             public string? NewestDownloadPath { get; set; }
+            public string? Relaunch { get; set; }
 
             public void ShowUsage()
             {
@@ -26,6 +27,7 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                     "--newest-manifestPath <最新的manifest文件路径或URL>\n" +
                     "--newest-patchesPath <最新的patches文件路径或URL>\n" +
                     "--newest-downloadPath <最新的download文件路径或URL>\n" +
+                    "--relaunch <更新完成后启动的exe路径>\n" +
                     "--debug  输出更多日志\n");
             }
         }
@@ -56,6 +58,9 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                                 break;
                             case "--newest-downloadPath":
                                 options.NewestDownloadPath = args[++i];
+                                break;
+                            case "--relaunch":
+                                options.Relaunch = args[++i];
                                 break;
                         }
                     }
@@ -113,7 +118,6 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
             Debug.Assert(_options.localRootPath != null);
             Debug.Assert(Path.Exists(_options.localRootPath));
             Debug.Assert(_options.localManifestPath != null);
-            Debug.Assert(File.Exists(_options.localManifestPath));
 
             Debug.Assert(_options.NewestManifestPath != null);
             Debug.Assert(_options.NewestPatchesPath != null);
@@ -133,12 +137,15 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 Logger.Success("最新Manifest已读取\n");
 
                 //获取本地manifest
-                ManifestModel localManifest = new ManifestModel(_options.localManifestPath);
-                if (newestManifest == null)
+                ManifestModel localManifest;
+                if (File.Exists(_options.localManifestPath))
                 {
-                    Logger.Fail("本地Manifest获取失败\n");
-                    Environment.Exit(-4);
-                    return;
+                    localManifest = new ManifestModel(_options.localManifestPath);
+                }
+                else
+                {
+                    Logger.Info("本地Manifest未找到，视为首次运行\n");
+                    localManifest = new ManifestModel(new Version("1.0.0"));
                 }
                 Logger.Success("本地Manifest已读取\n");
 
@@ -147,8 +154,8 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 // 比对生成UUID
                 if (luuid == nuuid)
                 {
-                    Logger.Info("客户端已是最新版本，无需更新\n");
-                    Environment.Exit(0);
+                    Logger.Info("已是最新版本\n");
+                    RelaunchAndExit();
                     return;
                 }
                 Logger.Info($"发现新版本：{nuuid}（当前版本：{luuid}），开始尝试增量更新\n");
@@ -435,13 +442,35 @@ namespace Ra3.BattleNet.Updater.Client.PatchIndexApplyer
                 }
 
                 Logger.Success("更新程序执行完毕\n");
-                Environment.Exit(0);
+                RelaunchAndExit();
             }
             catch (Exception ex)
             {
                 Logger.Fail($"更新过程发生错误：{ex.Message}\n");
-                Environment.Exit(-7);
+                RelaunchAndExit();
             }
+        }
+
+        private static void RelaunchAndExit()
+        {
+            if (!string.IsNullOrEmpty(_options.Relaunch))
+            {
+                Logger.Info($"拉起: {_options.Relaunch}\n");
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = _options.Relaunch,
+                        WorkingDirectory = _options.localRootPath!,
+                        UseShellExecute = true
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.Fail($"拉起失败: {ex.Message}\n");
+                }
+            }
+            Environment.Exit(0);
         }
         internal enum DownloadType
         {
