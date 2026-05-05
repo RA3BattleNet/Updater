@@ -13,6 +13,13 @@ public partial class App : Application
         var args = e.Args;
         Logger.IsDebug = args.Contains("--debug");
 
+        if (args.Contains("--preview"))
+        {
+            MainWindow = new MainWindow(null, null);
+            MainWindow.Show();
+            return;
+        }
+
         string? localRootPath = null, localManifestPath = null,
                 newestManifestPath = null, newestPatchesPath = null,
                 newestDownloadPath = null, relaunch = null;
