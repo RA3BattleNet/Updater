@@ -12,4 +12,13 @@
     <ProjectReference Include="..\Ra3.BattleNet.Updater.Share\Ra3.BattleNet.Updater.Share.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\Ra3.BattleNet.Updater.Share\hdiffpatch_bin\win-x86\hdiffz.exe"
+             Link="hdiffpatch_bin\win-x86\hdiffz.exe"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Ra3.BattleNet.Updater.Share\hdiffpatch_bin\win-x86\hpatchz.exe"
+             Link="hdiffpatch_bin\win-x86\hpatchz.exe"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
