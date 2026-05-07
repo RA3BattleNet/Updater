@@ -83,6 +83,12 @@ public class PatchIndexApplyerEngine
 
             if (newFile.Mode == FileModeEnum.Skip) continue;
 
+            var fileDir = newFile.Path.TrimStart('/', '\\');
+            if (fileDir == "CoronaData" ||
+                fileDir.StartsWith("CoronaData/") ||
+                fileDir.StartsWith("CoronaData\\"))
+                continue;
+
             Report(i, total, newFile.FileName, "检查中");
 
             var localFile = localManifest.Manifest.Files.FirstOrDefault(f => f.UUID == newFile.UUID);
