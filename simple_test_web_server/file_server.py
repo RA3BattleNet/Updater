@@ -1,21 +1,23 @@
 from flask import Flask, send_file, send_from_directory, abort, request, jsonify
 import os
-from pathlib import Path
+import sys
+import argparse
 import threading
 import time
 
 app = Flask(__name__)
 
-# 只统计 /download 路由的流量
 total_in_bytes = 0
 total_out_bytes = 0
 last_in_bytes = 0
 last_out_bytes = 0
 current_in_bandwidth = 0
 current_out_bandwidth = 0
+
+SERVER_DIR = None
+
 def format_bytes(size):
-    # 转换为易读单位
-    for unit in ['字节', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if size < 1024.0:
             return f"{size:.2f} {unit}"
         size /= 1024.0
@@ -24,14 +26,12 @@ def format_bytes(size):
 def bandwidth_monitor():
     global last_in_bytes, last_out_bytes, current_in_bandwidth, current_out_bandwidth
     while True:
-        time.sleep(0.2)
-        # 计算最近一秒的带宽
+        time.sleep(1)
         current_in_bandwidth = total_in_bytes - last_in_bytes
         current_out_bandwidth = total_out_bytes - last_out_bytes
         last_in_bytes = total_in_bytes
         last_out_bytes = total_out_bytes
 
-# 启动带宽监控线程
 threading.Thread(target=bandwidth_monitor, daemon=True).start()
 
 def secure_path(base_dir, filename):
@@ -41,54 +41,41 @@ def secure_path(base_dir, filename):
         return None
     return requested_path
 
-XML_FILE_PATH = r'C:\Users\kt\Downloads\test\server\ori\CoronaLauncher_Setup_3.12.9381.2215.xml'
-JSON_FILE_PATH = r'C:\Users\kt\Downloads\test\server\patch\patches.json'
-DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch'
-FILES_DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch\files'
-PATCHES_DOWNLOAD_DIR = r'C:\Users\kt\Downloads\test\server\patch\patches'
-
 @app.route('/')
 def index():
     return f"""
-    <h1>本地文件服务测试</h1>
+    <h1>增量更新本地测试服务器</h1>
     <ul>
-        <li><a href="/manifest.xml">查看XML文件</a></li>
-        <li><a href="/patches.json">查看JSON文件</a></li>
-        <li><a href="/download/">文件下载请求</a></li>
+        <li><a href="/manifest.xml">manifest.xml</a></li>
+        <li><a href="/patches.json">patches.json</a></li>
+        <li><a href="/download/">download 根目录</a></li>
     </ul>
-    <p>使用 <code>/download/&lt;类型&gt;/文件名</code> 格式下载文件</p>
+    <p>下载格式: <code>/download/files/&lt;md5&gt;</code> 或 <code>/download/patches/&lt;guid&gt;</code></p>
+    <p>服务目录: <code>{SERVER_DIR}</code></p>
     <hr>
     <div id="stats">
-        <b>仅统计 /download 路由：</b><br>
-        入站流量（请求体）：{total_in_bytes} 字节（{format_bytes(total_in_bytes)}）<br>
-        出站流量（响应体）：{total_out_bytes} 字节（{format_bytes(total_out_bytes)}）<br>
-        <b>实时带宽：</b><br>
-        入站带宽：{current_in_bandwidth} 字节/秒（{format_bytes(current_in_bandwidth)}/秒）<br>
-        出站带宽：{current_out_bandwidth} 字节/秒（{format_bytes(current_out_bandwidth)}/秒）<br>
+        <b>download 路由流量统计：</b><br>
+        入站: {total_in_bytes} B ({format_bytes(total_in_bytes)})<br>
+        出站: {total_out_bytes} B ({format_bytes(total_out_bytes)})<br>
+        入站带宽: {format_bytes(current_in_bandwidth)}/s<br>
+        出站带宽: {format_bytes(current_out_bandwidth)}/s<br>
     </div>
-    <button onclick="resetStats()">流量计数清零</button>
+    <button onclick="resetStats()">清零</button>
     <script>
     function updateStats() {{
         fetch('/stats')
-            .then(response => response.json())
-            .then(data => {{
+            .then(r => r.json())
+            .then(d => {{
                 document.getElementById('stats').innerHTML = `
-                    <b>仅统计 /download 路由：</b><br>
-                    入站流量（请求体）：${{data.total_in_bytes}} 字节（${{data.total_in_human}}）<br>
-                    出站流量（响应体）：${{data.total_out_bytes}} 字节（${{data.total_out_human}}）<br>
-                    <b>实时带宽：</b><br>
-                    入站带宽：${{data.current_in_bandwidth}} 字节/秒（${{data.in_bandwidth_human}}/秒）<br>
-                    出站带宽：${{data.current_out_bandwidth}} 字节/秒（${{data.out_bandwidth_human}}/秒）<br>
+                    <b>download 路由流量统计：</b><br>
+                    入站: ${{d.total_in_bytes}} B (${{d.total_in_human}})<br>
+                    出站: ${{d.total_out_bytes}} B (${{d.total_out_human}})<br>
+                    入站带宽: ${{d.in_bandwidth_human}}/s<br>
+                    出站带宽: ${{d.out_bandwidth_human}}/s<br>
                 `;
             }});
     }}
-    function resetStats() {{
-        fetch('/reset_stats', {{method: 'POST'}})
-            .then(response => response.json())
-            .then(data => {{
-                updateStats();
-            }});
-    }}
+    function resetStats() {{ fetch('/reset_stats', {{method: 'POST'}}); }}
     setInterval(updateStats, 2000);
     </script>
     """
@@ -96,52 +83,31 @@ def index():
 @app.route('/download/<path:filename>')
 def download_file(filename):
     global total_in_bytes, total_out_bytes
-    try:
-        safe_path = secure_path(DOWNLOAD_DIR, filename)
-        if safe_path is None:
-            abort(404)
-    except:
+    safe_path = secure_path(SERVER_DIR, filename)
+    if safe_path is None or not os.path.isfile(safe_path):
         abort(404)
-
-    if not os.path.exists(safe_path) or not os.path.isfile(safe_path):
-        abort(404)
-
-    # 入站流量（请求体长度，GET为0，POST可用request.content_length）
     total_in_bytes += request.content_length or 0
-    # 出站流量（文件大小）
     total_out_bytes += os.path.getsize(safe_path)
-
-    return send_from_directory(
-        DOWNLOAD_DIR,
-        filename,
-        as_attachment=False
-    )
+    return send_from_directory(SERVER_DIR, filename, as_attachment=False)
 
 @app.route('/manifest.xml')
 def serve_xml():
-    if not os.path.exists(XML_FILE_PATH):
+    path = os.path.join(SERVER_DIR, 'manifest.xml')
+    if not os.path.isfile(path):
         abort(404)
-    try:
-        return send_file(XML_FILE_PATH, mimetype='application/xml')
-    except FileNotFoundError:
-        abort(404)
+    return send_file(path, mimetype='application/xml')
 
 @app.route('/patches.json')
 def serve_json():
-    if not os.path.exists(JSON_FILE_PATH):
+    path = os.path.join(SERVER_DIR, 'patches.json')
+    if not os.path.isfile(path):
         abort(404)
-    try:
-        return send_file(JSON_FILE_PATH, mimetype='application/json')
-    except FileNotFoundError:
-        abort(404)
+    return send_file(path, mimetype='application/json')
 
 @app.route('/reset_stats', methods=['POST'])
 def reset_stats():
     global total_in_bytes, total_out_bytes, last_in_bytes, last_out_bytes
-    total_in_bytes = 0
-    total_out_bytes = 0
-    last_in_bytes = 0
-    last_out_bytes = 0
+    total_in_bytes = total_out_bytes = last_in_bytes = last_out_bytes = 0
     return jsonify({"status": "ok"})
 
 @app.route('/stats')
@@ -154,14 +120,26 @@ def stats():
         "total_in_human": format_bytes(total_in_bytes),
         "total_out_human": format_bytes(total_out_bytes),
         "in_bandwidth_human": format_bytes(current_in_bandwidth),
-        "out_bandwidth_human": format_bytes(current_out_bandwidth)
+        "out_bandwidth_human": format_bytes(current_out_bandwidth),
     }
 
 if __name__ == '__main__':
-    local_addr="127.0.0.1"
-    local_port=23456
-    print("启动本地文件服务...")
-    print(f"访问 http://{local_addr}:{local_port}/ 查看服务")
-    print(f"XML文件: http://{local_addr}:{local_port}/manifest.xml")
-    print(f"JSON文件: http://{local_addr}:{local_port}/patches.json")
-    app.run(debug=True, host=local_addr,port=local_port)
+    parser = argparse.ArgumentParser(description='增量更新本地测试 HTTP 服务器')
+    parser.add_argument('--port', type=int, default=23456)
+    parser.add_argument('--dir', type=str, required=True,
+                        help='服务目录，需包含 manifest.xml、patches.json、files/、patches/')
+    args = parser.parse_args()
+
+    SERVER_DIR = os.path.abspath(args.dir)
+    if not os.path.isdir(SERVER_DIR):
+        print(f"错误：目录不存在: {SERVER_DIR}")
+        sys.exit(1)
+
+    local_addr = "127.0.0.1"
+    print(f"=== 增量更新本地测试服务器 ===")
+    print(f"服务目录: {SERVER_DIR}")
+    print(f"地址:     http://{local_addr}:{args.port}")
+    print(f"Manifest: http://{local_addr}:{args.port}/manifest.xml")
+    print(f"Patches:  http://{local_addr}:{args.port}/patches.json")
+    print(f"Download: http://{local_addr}:{args.port}/download/...")
+    app.run(debug=True, host=local_addr, port=args.port)
