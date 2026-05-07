@@ -96,14 +96,12 @@ namespace Ra3.BattleNet.Updater.Share.Models
             }
             catch (Exception ex)
             {
-                Logger.Fail($"无法加载XML：{XmlPath}{Environment.NewLine}");
-                Environment.Exit(2);
+                throw new InvalidDataException($"无法加载XML：{XmlPath}", ex);
             }
             XmlNode? MNode = xmlDoc.SelectSingleNode("/Metadata");
             if (MNode == null)
             {
-                Logger.Fail("XML 解析失败: Metadata 节点不存在\n");
-                Environment.Exit(3);
+                throw new InvalidDataException("XML 解析失败: Metadata 节点不存在");
             }
             _version = new Version(MNode.Attributes["Version"].Value);
             _tags = new Tags(MNode.SelectSingleNode("Tags"));

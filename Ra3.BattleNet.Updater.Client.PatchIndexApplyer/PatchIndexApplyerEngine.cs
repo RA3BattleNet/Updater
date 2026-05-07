@@ -80,14 +80,20 @@ public class PatchIndexApplyerEngine
         for (var i = 0; i < files.Count; i++)
         {
             var newFile = files[i];
+
+            if (newFile.Mode == FileModeEnum.Skip) continue;
+
             Report(i, total, newFile.FileName, "检查中");
 
             var localFile = localManifest.Manifest.Files.FirstOrDefault(f => f.UUID == newFile.UUID);
-            var localFilePath = Path.Combine(_options.LocalRootPath,
-                (localFile?.Path ?? "").TrimStart('/', '\\'),
-                localFile?.FileName ?? "");
+            string? localFilePath = null;
+            if (localFile != null)
+            {
+                localFilePath = Path.Combine(_options.LocalRootPath,
+                    localFile.Path.TrimStart('/', '\\'), localFile.FileName);
+            }
 
-            if (localFile == null || !File.Exists(localFilePath))
+            if (localFile == null || localFilePath == null || !File.Exists(localFilePath))
             {
                 Report(i, total, newFile.FileName, "下载");
                 var ok = await DownloadAndCopyAsync(_cachePath, newFile.MD5, newFile, localFile);
@@ -103,22 +109,15 @@ public class PatchIndexApplyerEngine
                 {
                     Report(i, total, newFile.FileName, "增量补丁");
                     var ok = await ApplyPatchAsync(patchGuid.Value, localFilePath, newFile, localFile);
-                    if (ok)
-                    {
-                        UpdateManifestEntry(localManifest, localFile, newFile);
-                        continue;
-                    }
+                    if (ok) continue;
                 }
 
                 Report(i, total, newFile.FileName, "下载");
                 var downloadOk = await DownloadAndCopyAsync(_cachePath, newFile.MD5, newFile, localFile);
                 if (!downloadOk) allSuccess = false;
             }
-
-            UpdateManifestEntry(localManifest, localFile, newFile);
         }
 
-        newestManifest.Tags.UUID = newestManifest.Tags.UUID;
         newestManifest.SaveToXml(_options.LocalManifestPath);
         Report(total, total, "", "完成");
         return allSuccess;
@@ -197,12 +196,6 @@ public class PatchIndexApplyerEngine
         }
     }
 
-    private static void UpdateManifestEntry(ManifestModel local, ManifestFile? old, ManifestFile @new)
-    {
-        if (old != null) local.Manifest.Files.Remove(old);
-        if (!local.Manifest.Files.Any(f => f.UUID == @new.UUID))
-            local.Manifest.Files.Add(@new);
-    }
 
     internal enum DownloadType { patches, files }
 
