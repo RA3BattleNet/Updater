@@ -89,6 +89,11 @@ public class PatchIndexApplyerEngine
                 fileDir.StartsWith("CoronaData\\"))
                 continue;
 
+            if (fileDir == "dotnet" ||
+                fileDir.StartsWith("dotnet/") ||
+                fileDir.StartsWith("dotnet\\"))
+                continue;
+
             Report(i, total, newFile.FileName, "检查中");
 
             var localFile = localManifest.Manifest.Files.FirstOrDefault(f => f.UUID == newFile.UUID);
@@ -108,7 +113,11 @@ public class PatchIndexApplyerEngine
             else
             {
                 var localMd5 = ComputeMD5(localFilePath);
-                if (localMd5 == newFile.MD5) continue;
+                if (localMd5 == newFile.MD5)
+                {
+                    Report(i, total, newFile.FileName, "跳过");
+                    continue;
+                }
 
                 var patchGuid = patchIndex.FindPatch(newFile.UUID, localMd5, newFile.MD5);
                 if (patchGuid != null)
