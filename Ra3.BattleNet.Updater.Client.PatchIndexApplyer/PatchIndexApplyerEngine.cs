@@ -124,8 +124,17 @@ public class PatchIndexApplyerEngine
             }
         }
 
-        newestManifest.SaveToXml(_options.LocalManifestPath);
-        Report(total, total, "", "完成");
+        if (allSuccess)
+        {
+            newestManifest.SaveToXml(_options.LocalManifestPath);
+            Logger.Success($"更新完成，已更新本地 Manifest，版本 {newestManifest.Tags.UUID:N}\n");
+        }
+        else
+        {
+            Logger.Fail("部分文件更新失败，未更新本地 Manifest\n");
+        }
+
+        Report(total, total, "", allSuccess ? "完成" : "失败");
         return allSuccess;
     }
 
