@@ -2,6 +2,7 @@
 using static Ra3.BattleNet.Updater.Share.Utilities.PublicMethod;
 using Ra3.BattleNet.Updater.Share.Models;
 using System.Diagnostics;
+using System.Linq;
 namespace Ra3.BattleNet.Updater.XmlGenerator
 {
     internal class CommandLineOptions
@@ -9,6 +10,7 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
         public string? OldXmlPath { get; set; }
         public string TargetDir { get; set; }
         public string? NewXmlOutPutPath { get; set; }
+        public List<string> ExcludeDirs { get; set; } = new();
         public void Parse(string[] args)
         {
             if (args.Contains("--help"))
@@ -30,6 +32,12 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
                             break;
                         case "--new-xmloutputpath":
                             NewXmlOutPutPath = args[++i];
+                            break;
+                        case "--exclude-dirs":
+                            ExcludeDirs = args[++i]
+                                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                .Select(d => d.Trim().TrimStart('/', '\\'))
+                                .ToList();
                             break;
                     }
                 }
@@ -59,6 +67,7 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
             Console.WriteLine("  --old-xmlpath <路径>       指定旧的xml文件路径（可选）");
             Console.WriteLine("  --target-dir <目录>       必需，指定目标目录");
             Console.WriteLine("  --new-xmloutputpath <路径> 指定新生成的xml输出路径");
+            Console.WriteLine("  --exclude-dirs <目录列表>  逗号分隔，这些顶层目录下的文件标记为 Skip 模式");
             Console.WriteLine("  --help                    显示帮助信息");
             Console.WriteLine("  --debug                   开启DEBUG调试");
             Console.WriteLine();
@@ -122,11 +131,20 @@ namespace Ra3.BattleNet.Updater.XmlGenerator
                 string RelativePath = GetRelativePath(BasePath, Path.GetDirectoryName(FullPath));
                 // \Ra3.BattleNet.Updater.Server\obj
 
-                newManifest.Manifest.Files.Add(new ManifestFile(Guid.NewGuid(),
+                var file = new ManifestFile(Guid.NewGuid(),
                     FileName,
                     BitConverter.ToString(GetMD5(FullPath)).Replace("-", "").ToLower(),
                     RelativePath,
-                    (new Version(1, 0, 0)).ToString()));
+                    (new Version(1, 0, 0)).ToString());
+
+                var topDir = RelativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                topDir = topDir.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+                if (options.ExcludeDirs.Any(d => topDir.Equals(d, StringComparison.OrdinalIgnoreCase)))
+                {
+                    file.Mode = FileModeEnum.Skip;
+                }
+
+                newManifest.Manifest.Files.Add(file);
             }
 
             if (oldManifest != null)
