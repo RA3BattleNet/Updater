@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<Metadata Version="2.0.0">
+  <Tags>
+    <UUID>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</UUID>
+    <GenTime>1700000001</GenTime>
+    <Commit>测试新版本 v2</Commit>
+  </Tags>
+  <Includes />
+  <Manifest>
+    <File>
+      <UUID>11111111111111111111111111111111</UUID>
+      <FileName>test.txt</FileName>
+      <MD5>MD5:ad6356ae5c390825abc0b2409192a765</MD5>
+      <Path>\</Path>
+      <Version>2.0.0</Version>
+      <Type>Text</Type>
+      <Mode>Auto</Mode>
+      <KindOf>TEST;NEW;</KindOf>
+    </File>
+  </Manifest>
+</Metadata>

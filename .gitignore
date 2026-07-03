@@ -31,6 +31,7 @@ bld/
 [Bb]in/
 [Oo]bj/
 [Ll]og/
+![Ll]og/*.cs
 [Ll]ogs/
 
 # Visual Studio 2015/2017 cache/options directory
@@ -414,3 +415,13 @@ FodyWeavers.xsd
 
 temp.*
 temp/
+
+# C++ build output
+build/
+out/
+
+# vcpkg installed packages
+vcpkg_installed/
+buildtrees/
+downloads/
+packages/

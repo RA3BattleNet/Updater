@@ -1,0 +1,24 @@
+# Build
+build/
+out/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Windows
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.dll
+
+# vcpkg
+vcpkg_installed/
+buildtrees/
+downloads/
+packages/

@@ -1,0 +1,8 @@
+[
+  {
+    "UUID": "11111111111111111111111111111111",
+    "PatchName": "test_patch_abc123",
+    "OldMD5": "MD5:39ebbb4ad56e8b32423526ffbf1c455e",
+    "NewMD5": "MD5:ad6356ae5c390825abc0b2409192a765"
+  }
+]
