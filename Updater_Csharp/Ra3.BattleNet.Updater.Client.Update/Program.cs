@@ -78,8 +78,10 @@ internal static class Program
         var fallback = new List<string>();
         var concurrency = 4;
         var verifyUnchanged = false;
-        var thresholdFiles = 500;
-        var thresholdRatio = 0.30;
+        // 保险丝默认**关闭**（AGENT.md §4.4 / Q4）：变更文件多正是增量该发挥作用的场景。
+        // 这里原来是 500 / 0.30 —— 等于默认开启，会让"变更文件多"直接被判成需要完整包。
+        var thresholdFiles = 0;
+        var thresholdRatio = 0.0;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -143,8 +145,8 @@ internal static class Program
         Console.WriteLine("  --exclude <列表>          不受管顶层目录，逗号分隔");
         Console.WriteLine("  --fallback <列表>         备用基准地址，逗号分隔");
         Console.WriteLine("  --concurrency <N>         并发上限（默认 4）");
-        Console.WriteLine("  --threshold-files <N>     待下载文件数阈值（默认 500）");
-        Console.WriteLine("  --threshold-ratio <R>     待下载文件数占比阈值（默认 0.30）");
+        Console.WriteLine("  --threshold-files <N>     待下载文件数阈值（默认 0 = 关闭）");
+        Console.WriteLine("  --threshold-ratio <R>     待下载文件数占比阈值（默认 0 = 关闭）");
         Console.WriteLine("  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）");
         Console.WriteLine("  --json                    只输出一行 JSON 结果");
     }
