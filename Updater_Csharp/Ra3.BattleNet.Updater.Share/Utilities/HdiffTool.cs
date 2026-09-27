@@ -43,13 +43,43 @@ public static class HdiffTool
         return null;
     }
 
-    /// <summary>生成补丁：hdiffz -s -f &lt;old&gt; &lt;new&gt; &lt;patch&gt;（服务端发布流水线用，同步即可）</summary>
+    /// <summary>
+    /// 生成补丁：<c>hdiffz [diff模式] [-c-压缩] -f old new patch</c>。
+    ///
+    /// 实测（v4→v5 最大的 12 个内容对、95.9 MiB 目标内容、同一个 hdiffz v4.8.0）：
+    /// <code>
+    ///   -s -f           70,109,124 B  (69.7% of 目标文件)   ← 原来的写法
+    ///   -m -c-zstd -f   22,793,727 B  (22.7% of 目标文件)   ← 3.08 倍
+    /// </code>
+    /// 两处都得改，而且**客户端一行都不用动**（hpatchz 认格式头）：
+    /// <list type="number">
+    /// <item><c>-s</c> 在 hdiffz 里是"整个文件按**流**匹配（省内存、快）"，**不是压缩**，
+    /// 而且明显比默认的 <c>-m</c> 大。只有当文件大到放不进内存时才该用 <c>-s</c>
+    /// （§7.1 当初选 HDiffPatch 就是冲"大于内存的大文件"去的，所以这个判断要保留）。</item>
+    /// <item>补丁**默认不压缩**（<c>-c-...</c> 的默认值是 uncompress）—— 规范里
+    /// "补丁本身已被压缩、不要再压"这个假设是错的。加 <c>-c-zstd</c> 之后客户端照旧解压。</item>
+    /// </list>
+    /// </summary>
     public static bool Generate(string toolsDir, string oldFile, string newFile, string patchFile, out string error)
     {
-        var (ok, err) = RunAsync(toolsDir, "hdiffz", new[] { "-s", "-f", oldFile, newFile, patchFile }, CancellationToken.None)
+        var (ok, err) = RunAsync(toolsDir, "hdiffz", BuildDiffArgs(oldFile, newFile, patchFile), CancellationToken.None)
             .GetAwaiter().GetResult();
         error = err;
         return ok;
+    }
+
+    /// <summary>`-m` 需要 <c>newSize + oldSize*5</c> 字节内存（hdiffz -h 的原文）；超出预算就退回 `-s`。</summary>
+    public const long MemoryBudgetBytes = 512L * 1024 * 1024;
+
+    private static string[] BuildDiffArgs(string oldFile, string newFile, string patchFile)
+    {
+        long oldSize = new FileInfo(oldFile).Length;
+        long newSize = new FileInfo(newFile).Length;
+
+        // 放得进内存就用 -m（最小补丁），否则退回 -s（流式，省内存）
+        var mode = newSize + oldSize * 5 <= MemoryBudgetBytes ? "-m" : "-s";
+
+        return [mode, "-c-zstd", "-f", oldFile, newFile, patchFile];
     }
 
     /// <summary>应用补丁（同步入口，离线补丁包链路用）。</summary>
