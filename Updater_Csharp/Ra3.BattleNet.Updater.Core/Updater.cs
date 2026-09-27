@@ -49,7 +49,7 @@ public sealed class Updater
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, manifest.Reason);
 
         if (manifest.NotModified)
-            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty);
+            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
 
         var remoteBytes = manifest.Content!;
         var remoteHash = Hashing.Md5(remoteBytes);
@@ -57,7 +57,7 @@ public sealed class Updater
         if (!string.IsNullOrEmpty(manifest.ETag)) Fs.WriteAllText(etagPath, manifest.ETag!);
 
         if (localHash is not null && string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
-            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty);
+            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
 
         ManifestModel remote;
         try
@@ -181,7 +181,7 @@ public sealed class Updater
             var tmp = localManifestPath + ".tmp";
             Fs.WriteAllBytes(tmp, remoteBytes);
             Fs.Place(tmp, localManifestPath);
-            return Finish(log, tally, sw, UpdateOutcome.Updated, UpdateReasons.None, string.Empty);
+            return Finish(log, tally, sw, UpdateOutcome.Updated, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
         }
 
         // 失败收敛（§4.5）：本地内容不一致导致的失败多到一定程度，判定需要完整包
@@ -333,7 +333,7 @@ public sealed class Updater
         log.Run(string.Empty, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             (long)sw.Elapsed.TotalMilliseconds, outcome.ToString());
 
-        return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed);
+        return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed, detail);
     }
 
     private static string ActionName(PlanAction action) => action switch

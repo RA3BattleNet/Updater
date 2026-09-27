@@ -28,6 +28,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Clien
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Server.PatchGenerator", "Ra3.BattleNet.Updater.Server.PatchGenerator\Ra3.BattleNet.Updater.Server.PatchGenerator.csproj", "{8CFD42E4-A437-45BB-9446-2EB8594C732F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Tests", "Ra3.BattleNet.Updater.Tests\Ra3.BattleNet.Updater.Tests.csproj", "{62F0FA20-97D0-4790-A974-917DCB6B3788}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -232,6 +234,26 @@ Global
 		{8CFD42E4-A437-45BB-9446-2EB8594C732F}.Release|x64.Build.0 = Release|Any CPU
 		{8CFD42E4-A437-45BB-9446-2EB8594C732F}.Release|x86.ActiveCfg = Release|Any CPU
 		{8CFD42E4-A437-45BB-9446-2EB8594C732F}.Release|x86.Build.0 = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|ARM.ActiveCfg = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|ARM.Build.0 = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|x64.Build.0 = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Debug|x86.Build.0 = Debug|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|Any CPU.Build.0 = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|ARM.ActiveCfg = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|ARM.Build.0 = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|ARM64.Build.0 = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|x64.ActiveCfg = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|x64.Build.0 = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|x86.ActiveCfg = Release|Any CPU
+		{62F0FA20-97D0-4790-A974-917DCB6B3788}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -51,6 +51,7 @@ internal static class Program
             {
                 result.Outcome,
                 result.Reason,
+                result.Detail,
                 result.Total,
                 result.Skipped,
                 result.Moved,

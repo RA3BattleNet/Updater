@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 自带 Main（见 Program.cs）：本机沙箱里 VSTest 的 testhost 会因
+         Process.GetProcessHandle 被拒而挂掉，故提供一个等价的反射跑器。
+         测试本身仍是标准 xUnit [Fact]，在正常机器上 dotnet test 照常可用。 -->
+    <GenerateProgramFile>false</GenerateProgramFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ra3.BattleNet.Updater.Core\Ra3.BattleNet.Updater.Core.csproj" />
+    <ProjectReference Include="..\Ra3.BattleNet.Updater.Server\Ra3.BattleNet.Updater.Server.csproj" />
+  </ItemGroup>
+
+</Project>

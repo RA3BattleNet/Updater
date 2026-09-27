@@ -5,10 +5,13 @@ namespace Ra3.BattleNet.Updater.Core;
 
 internal sealed record DownloadOutcome(bool Ok, int StatusCode, long Bytes, string Reason);
 
-internal sealed record ManifestOutcome(bool Ok, bool NotModified, byte[]? Content, string? ETag, string Reason);
+internal sealed record ManifestOutcome(bool Ok, bool NotModified, byte[]? Content, string? ETag, string Reason, string? HttpVersion);
 
 /// <summary>
 /// HTTP 访问。要求：HTTP/2 多路复用、连接复用、条件请求、Range 续传（AGENT.md §4.6）。
+/// 注意：HTTP/2 在实践上依赖 TLS/ALPN，因此**只对 https 优先 h2**；
+/// 明文连接强制 HTTP/1.1（否则会走 h2c 直连，普通静态服务器无法应答）。
+/// 协商到的版本会记录到结果 Detail 里，便于确认 h2 真的生效（K7）。
 /// </summary>
 internal sealed class HttpFetcher : IDisposable
 {
@@ -40,26 +43,28 @@ internal sealed class HttpFetcher : IDisposable
             using var req = NewRequest(url);
             if (!string.IsNullOrEmpty(etag)) req.Headers.TryAddWithoutValidation("If-None-Match", etag);
 
-            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token)
+                .ConfigureAwait(false);
+            var version = $"HTTP/{resp.Version}";
 
             if (resp.StatusCode == HttpStatusCode.NotModified)
-                return new ManifestOutcome(true, true, null, etag, string.Empty);
+                return new ManifestOutcome(true, true, null, etag, string.Empty, version);
 
             if (!resp.IsSuccessStatusCode)
-                return new ManifestOutcome(false, false, null, null, $"manifest HTTP {(int)resp.StatusCode}");
+                return new ManifestOutcome(false, false, null, null, $"manifest HTTP {(int)resp.StatusCode}", version);
 
-            var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token);
-            return new ManifestOutcome(true, false, bytes, resp.Headers.ETag?.Tag, string.Empty);
+            var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
+            return new ManifestOutcome(true, false, bytes, resp.Headers.ETag?.Tag, string.Empty, version);
         }
         catch (Exception ex)
         {
-            return new ManifestOutcome(false, false, null, null, ex.Message);
+            return new ManifestOutcome(false, false, null, null, ex.Message, null);
         }
     }
 
     /// <summary>
     /// 下载到 <paramref name="destPath"/>。允许续传：未完成部分留在 <c>destPath.part</c>。
-    /// 返回 404 时表示"服务端没有这个资源"（补丁不存在），调用方据此回落。
+    /// 404 表示"服务端没有这个资源"（补丁不存在），调用方据此回落。
     /// </summary>
     public async Task<DownloadOutcome> DownloadAsync(string url, string destPath, CancellationToken ct)
     {
@@ -77,7 +82,8 @@ internal sealed class HttpFetcher : IDisposable
                 using var req = NewRequest(url);
                 if (existing > 0) req.Headers.Range = new RangeHeaderValue(existing, null);
 
-                using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token)
+                    .ConfigureAwait(false);
 
                 if (resp.StatusCode == HttpStatusCode.NotFound)
                     return new DownloadOutcome(false, 404, 0, UpdateReasons.NoPatch);
@@ -91,8 +97,10 @@ internal sealed class HttpFetcher : IDisposable
 
                 if (!resp.IsSuccessStatusCode)
                 {
-                    if (attempt == 3) return new DownloadOutcome(false, (int)resp.StatusCode, 0, $"HTTP {(int)resp.StatusCode}");
-                    await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct);
+                    if (attempt == 3)
+                        return new DownloadOutcome(false, (int)resp.StatusCode, 0, $"HTTP {(int)resp.StatusCode}");
+
+                    await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct).ConfigureAwait(false);
                     continue;
                 }
 
@@ -100,13 +108,13 @@ internal sealed class HttpFetcher : IDisposable
                 long written = append ? existing : 0;
 
                 using (var fs = Fs.OpenWrite(partPath, append))
-                using (var src = await resp.Content.ReadAsStreamAsync(cts.Token))
+                using (var src = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false))
                 {
                     var buffer = new byte[1 << 16];
                     int read;
-                    while ((read = await src.ReadAsync(buffer, cts.Token)) > 0)
+                    while ((read = await src.ReadAsync(buffer, cts.Token).ConfigureAwait(false)) > 0)
                     {
-                        await fs.WriteAsync(buffer.AsMemory(0, read), cts.Token);
+                        await fs.WriteAsync(buffer.AsMemory(0, read), cts.Token).ConfigureAwait(false);
                         written += read;
                     }
                 }
@@ -121,19 +129,31 @@ internal sealed class HttpFetcher : IDisposable
             catch (Exception ex)
             {
                 if (attempt == 3) return new DownloadOutcome(false, 0, 0, ex.Message);
-                await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct);
+                await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct).ConfigureAwait(false);
             }
         }
 
         return new DownloadOutcome(false, 0, 0, "下载重试超限");
     }
 
-    private static HttpRequestMessage NewRequest(string url) =>
-        new(HttpMethod.Get, url)
+    private static HttpRequestMessage NewRequest(string url)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, url);
+
+        // 仅 https 走 HTTP/2 优先；明文用 HTTP/1.1（h2c 直连在真实静态服务上不可用）
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
         {
-            Version = HttpVersion.Version20,
-            VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher,
-        };
+            req.Version = HttpVersion.Version20;
+            req.VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher;
+        }
+        else
+        {
+            req.Version = HttpVersion.Version11;
+            req.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+        }
+
+        return req;
+    }
 
     public void Dispose() => _http.Dispose();
 }

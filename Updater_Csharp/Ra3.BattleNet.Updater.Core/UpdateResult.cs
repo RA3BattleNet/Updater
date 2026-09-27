@@ -28,7 +28,8 @@ public sealed record UpdateResult(
     int Full,
     int FailedCount,
     long BytesDownloaded,
-    TimeSpan Elapsed)
+    TimeSpan Elapsed,
+    string Detail = "")
 {
     /// <summary>宿主是否可以跳过自己原有的更新逻辑。</summary>
     public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated;
