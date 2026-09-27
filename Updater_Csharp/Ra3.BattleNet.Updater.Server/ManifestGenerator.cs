@@ -58,8 +58,18 @@ public static class ManifestGenerator
     /// <summary>真正跑 hdiffz 的候选对数上限（§5.2：「有界」是硬要求）。</summary>
     public const int MaxProbePairs = 200;
 
-    /// <summary>传闻尺寸预筛窗口：疑似改名的两个文件大小不会差 4 倍以上。</summary>
-    public const double SizeWindowFactor = 4.0;
+    /// <summary>
+    /// 「疑似前身」**探测**的廉价预筛窗口：候选对的大小差超过 4 倍就直接不算（§5.2）。
+    /// 注意它和 <see cref="AutoLinkSizeWindowFactor"/> **不是同一件事**：
+    /// 前者是"值不值得跑一次 hdiffz"，后者是"敢不敢直接改 UUID"的证据强度，两者本来就不该共用一个数。
+    /// </summary>
+    public const double ProbeSizePrefilterFactor = 4.0;
+
+    /// <summary>
+    /// **自动关联**的尺寸证据窗口：同名配不上时，只有大小差 ≤2 倍才当作"疑似改名"（§5.2、README）。
+    /// 比探测预筛严 —— 因为这里的结果会被**直接写进清单**，宁可少配也不能配错。
+    /// </summary>
+    public const double AutoLinkSizeWindowFactor = 2.0;
 
     /// <summary>报告里最多列出多少条疑似改名。</summary>
     public const int MaxReportedCandidates = 20;
@@ -181,7 +191,7 @@ public static class ManifestGenerator
                 if (osize <= 0) continue;
 
                 double lo = Math.Min(nsize, osize), hi = Math.Max(nsize, osize);
-                if (hi > lo * SizeWindowFactor) continue;
+                if (hi > lo * ProbeSizePrefilterFactor) continue;
                 candidates.Add((nf, of, lo / hi));
             }
         }
@@ -284,7 +294,7 @@ public static class ManifestGenerator
         foreach (var a in added)
         {
             if (linkedAdded.Contains(a.UUID)) continue;
-            if (PickBest(a, removed, claimedRemoved, newRoot, oldRoot, SizeWindowFactor, out var score) is not { } best) continue;
+            if (PickBest(a, removed, claimedRemoved, newRoot, oldRoot, AutoLinkSizeWindowFactor, out var score) is not { } best) continue;
 
             claimedRemoved.Add(best.UUID);
             linkedAdded.Add(a.UUID);

@@ -452,11 +452,16 @@ public class VersionMatrixSimulation
         const string name = "S10_truncated_range_resume";
         Publish(2);
         var client = NewClient(name, 1);
-        using var http = new TestHttpServer(ServerDir) { TruncateBytes = 1 };
+        // 凡是不带 Range 的响应都少发 1 字节（续传请求照常发全）——
+        // 这就是"只在整份响应上出错"的现实形态，客户端必须靠续传补回来，而不是反复重放第一次。
+        using var http = new TestHttpServer(ServerDir)
+        {
+            TruncateBytes = 1, TruncateScope = TruncateScope.WithoutRange,
+        };
 
         var r = Run(client, http);
         var diff = Compare(2, client);
-        Capture(name, "每个响应都少发 1 字节：客户端应当用 Range 续传补回来，而不是整包重下",
+        Capture(name, "不带 Range 的响应少发 1 字节：客户端应当用 Range 续传补回来，而不是整包重下",
             client, r, diff.Text, BaselineBytes(1, 2));
 
         Assert.Equal(UpdateOutcome.Updated, r.Outcome);

@@ -53,24 +53,33 @@ internal sealed class UpdateLog : IDisposable
         }
     }
 
+    /// <summary>
+    /// 每轮运行**开始**一行。存在的理由：一次进程里可能跑两轮（取消 + 重跑），
+    /// 它们的 F/R 行混在同一个文件里；分析脚本必须按 run_id 分组才不会把账算错。
+    /// 只往行尾/新增行型追加，不改动既有列（§4.11）。
+    /// </summary>
+    public void RunStart(string utcIso) => Write($"S\t{RunId}\t{utcIso}");
+
     /// <summary>每文件一行。</summary>
     public void File(
         string uuid, string? oldMd5, string? oldPath, string? newMd5, string? newPath,
-        string action, int status, string reason, long bytes, long ms, long wire = 0)
+        string action, int status, string reason, long bytes, long ms, long payload = 0)
     {
-        // wire 是**追加在行尾**的新列（§4.11 只允许往行尾追加）：
-        // bytes = 内容字节（解压后写盘的量），wire = 真正走网线的字节（压缩后）。
+        // payload 是**追加在行尾**的新列（§4.11 只允许往行尾追加）：
+        // bytes   = 内容字节（解压后写盘的量）；
+        // payload = 本次为这个文件从响应正文里读到的字节（续传/重试各段都算）。
+        //           它**不是**真实网线字节 —— 口径见 HttpFetcher.PayloadBytes 与 OPEN_ISSUES I-2/M-1。
         // 开了传输压缩之后两者会差 2 倍以上，比"省了多少带宽"必须看后者。
-        Write($"F\t{RunId}\t{uuid}\t{oldMd5}\t{oldPath}\t{newMd5}\t{newPath}\t{action}\t{status}\t{reason}\t{bytes}\t{ms}\t{wire}");
+        Write($"F\t{RunId}\t{uuid}\t{oldMd5}\t{oldPath}\t{newMd5}\t{newPath}\t{action}\t{status}\t{reason}\t{bytes}\t{ms}\t{payload}");
     }
 
     /// <summary>每轮一行（收尾）。result 是增量命中率与节省量的唯一现场证据。</summary>
     public void Run(
         string manifestHash, int total, int skip, int move, int patch, int full, int fail,
-        long bytes, long ms, string result, long requests = 0, long wire = 0)
+        long bytes, long ms, string result, long requests = 0, long payload = 0)
     {
-        // requests / wire 都是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）
-        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}\t{wire}");
+        // requests / payload 都是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）
+        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}\t{payload}");
     }
 
     private void Write(string line)

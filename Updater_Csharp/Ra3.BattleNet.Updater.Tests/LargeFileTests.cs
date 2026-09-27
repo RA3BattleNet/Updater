@@ -251,7 +251,7 @@ public class LargeFileTests
             - 服务端准备（复制成内容寻址 blob）：{swServer.Elapsed.TotalSeconds:F1}s
             - 客户端：{result}
             - 客户端耗时 {sw.Elapsed.TotalSeconds:F1}s；请求数 {http.Requests}（截断 1 字节 → 必然有一次续传）
-            - 上网字节 {result.WireDownloaded:N0} B（含清单；续传那一次只补最后 1 字节）
+            - 载荷字节 {result.PayloadBytes:N0} B（含清单；续传那一次只补最后 1 字节）
             - 结果逐字节一致：{exact}
             """;
         WriteArtifact("ISO_4_large_full_download", text);
@@ -259,6 +259,6 @@ public class LargeFileTests
         Assert.Equal(UpdateOutcome.Updated, result.Outcome);
         Assert.Equal(0, result.FailedCount);
         Assert.True(exact, "5.6 GB 下载后必须逐字节一致");
-        Assert.True(result.WireDownloaded >= new FileInfo(newIso).Length, "上网字节应当至少等于文件大小");
+        Assert.True(result.PayloadBytes >= new FileInfo(newIso).Length, "上网字节应当至少等于文件大小");
     }
 }

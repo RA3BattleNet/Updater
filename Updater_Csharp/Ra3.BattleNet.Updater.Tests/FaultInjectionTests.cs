@@ -62,6 +62,37 @@ public class FaultInjectionTests
     }
 
     [Fact]
+    public void TruncationThatDeliversNoBytes_IsRetriedAsAnExplicitRangeRequest()
+    {
+        using var tmp = new TempDir();
+        var (v1, v2, m1, m2, gen) = Prepare(tmp);
+        var server = PrepareServer(tmp, m1, m2, v1, v2);
+        var client = PrepareClient(tmp, v1, m1);
+
+        // I-1 的实验室复现：**不带 Range** 的响应一个字节都不发（模拟真实链路上小响应被整块
+        // 缓冲在传输层，连接截断的异常先于任何字节到达读循环），带 Range 的续传照常发全。
+        // 老客户端在这里会三次都发同一个不带 Range 的 GET，次次空手而归 → download_failed；
+        // 修好之后第二次尝试会显式带上 `Range: bytes=0-`，于是换上另一条路走通。
+        // 注：本地明文下 .NET 可能"干净地"返回 0 字节而不是抛异常，两条路客户端都要能兜住 ——
+        // 一条靠 catch（一个字节都没落地），一条靠"声明长度 > 实收长度"的核对。
+        using var http = new TestHttpServer(server)
+        {
+            TruncateBytes = 1, DropBodyEntirely = true, TruncateScope = TruncateScope.WithoutRange,
+        };
+        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+
+        var result = new CoreUpdater(cfg).Run();
+
+        Assert.True(result.Outcome == UpdateOutcome.Updated,
+            $"应当靠显式 bytes=0- 的重试恢复，实得 {result}; Detail={result.Detail}");
+        TestSupport.AssertSameAs(gen.Manifest, v2, client);
+
+        // 关键断言：`.part` 里一个字节都没有的时候，重试必须**换请求形态**（显式 bytes=0-），
+        // 而不是把第一次原样重放（重放就是老 bug）。
+        Assert.Contains("bytes=0-", http.RequestRanges);
+    }
+
+    [Fact]
     public void TruncatedPayload_WithoutRangeSupport_EndsAsFailed_WithoutCorruption()
     {
         using var tmp = new TempDir();
@@ -69,8 +100,12 @@ public class FaultInjectionTests
         var server = PrepareServer(tmp, m1, m2, v1, v2);
         var client = PrepareClient(tmp, v1, m1);
 
-        // 服务端不支持 Range → 截断无法补救
-        using var http = new TestHttpServer(server) { TruncateBytes = 1, SupportRange = false };
+        // 服务端不支持 Range → 截断无法补救。这里必须用 Every：默认的 FirstOnly 只坑第一发，
+        // 而客户端现在会用显式 bytes=0- 重试，服务端哪怕不认 Range 也会正常发全 —— 那就变成"能补救"了。
+        using var http = new TestHttpServer(server)
+        {
+            TruncateBytes = 1, SupportRange = false, TruncateScope = TruncateScope.Every,
+        };
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new CoreUpdater(cfg).Run();

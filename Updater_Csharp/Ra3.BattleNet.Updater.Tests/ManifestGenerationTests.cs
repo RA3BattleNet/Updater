@@ -265,6 +265,38 @@ public class AutoLinkTests
         Assert.Empty(on.AutoLinked);
     }
 
+    /// <summary>
+    /// 自动关联的尺寸窗口是 **2 倍**（§5.2、README），而不是探测预筛那 4 倍 ——
+    /// 这里的结果会被**直接写进清单**，宁可少配也不能配错。
+    /// 这两个数过去共用一个常量，于是"文档说 2 倍、代码按 4 倍放行"（I-5）。
+    /// </summary>
+    [Fact]
+    public void AutoLinkSizeWindow_IsTwice_AndIsNotTheProbePrefilter()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        // 名字不同、尺寸差 3 倍：按 4 倍会配成一对，按 2 倍必须拒绝
+        TestSupport.WriteTree(v1, ("bin/Old.bin", TestSupport.Big("OLD", 64 * 1024)));
+        TestSupport.WriteTree(v2, ("bin/New.bin", TestSupport.Big("NEW", 192 * 1024)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        Assert.Empty(ManifestGenerator.Generate(v2, m1, [], oldRoot: v1).AutoLinked);
+
+        // 两个窗口是**两个不同的数**，不许再合并
+        Assert.Equal(2.0, ManifestGenerator.AutoLinkSizeWindowFactor);
+        Assert.NotEqual(ManifestGenerator.ProbeSizePrefilterFactor, ManifestGenerator.AutoLinkSizeWindowFactor);
+
+        // 1.5 倍在窗口内 → 正常配对（证明上面为空不是因为"根本配不上"）
+        TestSupport.WriteTree(v2, ("bin/New.bin", TestSupport.Big("NEW", 96 * 1024)));
+        var inside = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        var link = Assert.Single(inside.AutoLinked);
+        Assert.Equal(RenameLinkEvidence.Size, link.Evidence);
+    }
+
     [Fact]
     public void AutoLinkIsOnByDefault_AndCanBeTurnedOff()
     {

@@ -5,6 +5,19 @@ using System.Text;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
+/// <summary>截断注入的适用范围，见 <see cref="TestHttpServer.TruncateScope"/>。</summary>
+internal enum TruncateScope
+{
+    /// <summary>只有每个路径的**第一次、不带 Range** 的响应被截断（与 test2 中继的实测行为一致，默认）。</summary>
+    FirstOnly,
+
+    /// <summary>每个响应都截断，包括带 Range 的续传 —— 用来测"怎么都补不回来"的那条路。</summary>
+    Every,
+
+    /// <summary>凡是**不带 Range** 的响应一律截断，带 Range 的正常发全 —— I-1 的实验室复现。</summary>
+    WithoutRange,
+}
+
 /// <summary>
 /// 极简静态文件服务器（HTTP/1.1）：支持 ETag/If-None-Match 与 Range。
 /// 用来做真实的端到端测试，而不是 mock 掉网络层。
@@ -57,11 +70,40 @@ internal sealed class TestHttpServer : IDisposable
     /// <summary>&gt;0 时：声明完整 Content-Length，但实际少发这么多字节（模拟响应截断）。</summary>
     public int TruncateBytes { get; set; }
 
+    /// <summary>
+    /// 截断的**适用范围**（默认 <see cref="TruncateScope.FirstOnly"/>，与 test2 的中继实测一致）：
+    /// 真实链路上「响应被截断」几乎都发生在**不带 Range** 的整份响应上，
+    /// 续传请求（带 Range）通常能正常拿全 —— 客户端只要有办法换一条路就能自愈。
+    /// </summary>
+    public TruncateScope TruncateScope { get; set; } = TruncateScope.FirstOnly;
+
+    /// <summary>
+    /// true 时把响应体**整个丢掉**（仍声明完整 Content-Length）—— 模拟 TLS 上小响应被整块缓冲的行为：
+    /// 连接截断的异常先于任何字节到达读循环，客户端本地一个字节都没落地。
+    /// 这是 I-1 的原始症状，比"少一个字节"更狠，也更能区分"重试"和"原样重放"。
+    /// </summary>
+    public bool DropBodyEntirely { get; set; }
+
+    private readonly HashSet<string> _truncatedPaths = new(StringComparer.Ordinal);
+    private readonly List<string?> _ranges = [];
+
+    /// <summary>按到达顺序记录每个请求的 Range 头（null = 没带）。用来断言"重试确实换了请求形态"。</summary>
+    public IReadOnlyList<string?> RequestRanges
+    {
+        get { lock (_pathsLock) return _ranges.ToList(); }
+    }
+
     /// <summary>是否支持 Range（206）。关掉它就能测「截断后无法续传」的路径。</summary>
     public bool SupportRange { get; set; } = true;
 
     /// <summary>true 时所有 <c>/patches/</c> 请求都返回 404（模拟"服务端没有该内容对的补丁"）。</summary>
     public bool PatchNotFound { get; set; }
+
+    /// <summary>
+    /// 404 响应的正文长度。真实 CDN 会回一整页 HTML（实测 CF 上 28,455 B，
+    /// 能占到一次更新流量的 10%）—— 用来验证"错误响应的声明正文被如实计入 payload"。
+    /// </summary>
+    public int NotFoundBodyBytes { get; set; }
 
     /// <summary>
     /// true 时对 <c>files/</c>、<c>patches/</c> 的响应做 gzip 压缩并带 <c>Content-Encoding: gzip</c>
@@ -155,7 +197,11 @@ internal sealed class TestHttpServer : IDisposable
             var parts = requestLine.Split(' ');
             var urlPath = parts.Length > 1 ? parts[1] : "/";
             Interlocked.Increment(ref _requests);
-            lock (_pathsLock) _paths.Add(urlPath);
+            lock (_pathsLock)
+            {
+                _paths.Add(urlPath);
+                _ranges.Add(range);
+            }
 
             // 人为延迟放在「读请求之后、写响应之前」：并发度会直接体现为时间差与重叠峰值。
             // 计数窗口只包住延迟本身，串行客户端因此不可能出现峰值 2。
@@ -174,7 +220,8 @@ internal sealed class TestHttpServer : IDisposable
             if (file is null)
             {
                 Interlocked.Increment(ref _notFound);
-                WriteResponse(stream, 404, "Not Found", [], []);
+                WriteResponse(stream, 404, "Not Found", [],
+                    NotFoundBodyBytes > 0 ? new byte[NotFoundBodyBytes] : []);
                 return;
             }
 
@@ -230,10 +277,12 @@ internal sealed class TestHttpServer : IDisposable
             }
 
             // 只截断载荷：清单本身要保持完整，否则测的就不是"载荷截断"了
-            if (TruncateBytes > 0 && length > TruncateBytes && !isManifest)
+            if (TruncateBytes > 0 && !isManifest && ShouldTruncate(urlPath, range, length))
             {
                 // 声明完整长度，但只发 length - TruncateBytes 个字节 → 客户端应判定截断并重试
-                ServeFile(stream, file, 0, length - TruncateBytes, length, 200, "OK",
+                // （DropBodyEntirely 时一个字节都不发）
+                var sent = DropBodyEntirely ? 0 : length - TruncateBytes;
+                ServeFile(stream, file, 0, sent, length, 200, "OK",
                     [("ETag", etag), ("Accept-Ranges", "bytes")]);
                 return;
             }
@@ -241,6 +290,26 @@ internal sealed class TestHttpServer : IDisposable
             ServeFile(stream, file, 0, length, length, 200, "OK",
                 [("ETag", etag), ("Accept-Ranges", "bytes")]);
         }
+    }
+
+    /// <summary>这个响应要不要动手脚。除了"整份丢掉"之外，还得真的截得动（文件比要截的字节多）。</summary>
+    private bool ShouldTruncate(string urlPath, string? range, long length)
+    {
+        var eligible = TruncateScope switch
+        {
+            TruncateScope.Every => true,
+            TruncateScope.WithoutRange => range is null,
+            _ => range is null && MarkFirstTruncation(urlPath),
+        };
+
+        if (!eligible) return false;
+        return DropBodyEntirely ? length > 0 : length > TruncateBytes;
+    }
+
+    /// <summary>每个路径只坑第一次（返回 true 表示"这次是新的一发"，可以动手）。</summary>
+    private bool MarkFirstTruncation(string urlPath)
+    {
+        lock (_pathsLock) return _truncatedPaths.Add(urlPath);
     }
 
     /// <summary>流式发一个文件的一段：head 声明 <paramref name="declaredLength"/>，实际只写 <paramref name="count"/> 字节。</summary>

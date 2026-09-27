@@ -60,7 +60,7 @@ internal static class Program
                 result.Full,
                 result.FailedCount,
                 result.BytesDownloaded,
-                result.WireDownloaded,
+                result.PayloadBytes,
                 Ms = (long)result.Elapsed.TotalMilliseconds,
             }));
         }

@@ -34,14 +34,14 @@ public sealed record UpdateResult(
     TimeSpan Elapsed,
     string Detail = "",
     string HttpVersion = "",
-    long WireDownloaded = 0)
+    long PayloadBytes = 0)
 {
     /// <summary>宿主是否可以跳过自己原有的更新逻辑。</summary>
     public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated;
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
-        $"full={Full} fail={FailedCount} bytes={BytesDownloaded} wire={WireDownloaded} ms={(long)Elapsed.TotalMilliseconds}" +
+        $"full={Full} fail={FailedCount} bytes={BytesDownloaded} payload={PayloadBytes} ms={(long)Elapsed.TotalMilliseconds}" +
         (HttpVersion.Length > 0 ? $" http={HttpVersion}" : string.Empty);
 }
 

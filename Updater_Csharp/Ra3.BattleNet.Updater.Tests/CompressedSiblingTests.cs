@@ -95,8 +95,8 @@ public class CompressedSiblingTests
         Assert.Equal(2, http.RequestPaths.Count(p => p.StartsWith("/files/") && !p.EndsWith(".gz", StringComparison.Ordinal)));
 
         // 没有端到端压缩：网线字节 ≈ 内容字节 + 清单（清单也计入上网字节）
-        Assert.True(result.WireDownloaded > result.BytesDownloaded, "网线字节应当还包含清单本身");
-        Assert.True(result.WireDownloaded < result.BytesDownloaded * 1.5,
-            $"没压缩时两者应当接近：wire={result.WireDownloaded} content={result.BytesDownloaded}");
+        Assert.True(result.PayloadBytes > result.BytesDownloaded, "网线字节应当还包含清单本身");
+        Assert.True(result.PayloadBytes < result.BytesDownloaded * 1.5,
+            $"没压缩时两者应当接近：wire={result.PayloadBytes} content={result.BytesDownloaded}");
     }
 }

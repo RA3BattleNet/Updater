@@ -4,7 +4,7 @@ using System.Net.Http.Headers;
 
 namespace Ra3.BattleNet.Updater.Core;
 
-internal sealed record DownloadOutcome(bool Ok, int StatusCode, long Bytes, string Reason, long WireBytes = 0);
+internal sealed record DownloadOutcome(bool Ok, int StatusCode, long Bytes, string Reason, long PayloadBytes = 0);
 
 internal sealed record ManifestOutcome(bool Ok, bool NotModified, byte[]? Content, string? ETag, string Reason, string? HttpVersion);
 
@@ -30,13 +30,24 @@ internal sealed class HttpFetcher : IDisposable
     private static readonly TimeSpan ReArmInterval = TimeSpan.FromSeconds(2);
 
     private int _requests;
-    private long _wire;
+    private long _payload;
 
     /// <summary>
-    /// 本会话**真正读下网线**的字节数（压缩后就是压缩后的大小）。AGENT.md §2.2 要与整包比带宽，
-    /// 比的必须是这个数，而不是"解压后写盘的内容字节"—— 开了传输压缩之后两者差 2 倍以上。
+    /// 本会话**响应正文读取字节数** —— 具体口径（别再叫它 "wire"）：
+    /// <list type="bullet">
+    /// <item>成功响应：正文流里实际读到的字节（重试、续传的各段都算）；</item>
+    /// <item>清单：读到的是**透明解压后**的长度（主机若发了 br/gzip，这里会比网线上的大）；</item>
+    /// <item>错误响应（404/5xx）：只记服务端**声明**的正文长度 —— 我们提前中断，未必全收到；</item>
+    /// <item>304：0。</item>
+    /// </list>
+    /// 所以它**不等于**真实网线字节，只能当"内容 + 可见载荷"的估计。
+    /// 要做带宽验收（§2.1 F8）必须拿边缘/CDN 的出口统计（见 OPEN_ISSUES M-1）。
     /// </summary>
-    public long WireBytes => Interlocked.Read(ref _wire);
+    public long PayloadBytes => Interlocked.Read(ref _payload);
+
+    /// <summary>错误正文：只记服务端声明的长度（我们不会去读它，读了也只是浪费）。</summary>
+    private void CountDeclaredBody(HttpResponseMessage resp) =>
+        Interlocked.Add(ref _payload, resp.Content.Headers.ContentLength ?? 0);
 
     /// <summary>本会话发起的 HTTP 请求数（AGENT.md F8：请求数必须可观测）。</summary>
     public int Requests => Volatile.Read(ref _requests);
@@ -77,13 +88,15 @@ internal sealed class HttpFetcher : IDisposable
                 return new ManifestOutcome(true, true, null, etag, string.Empty, version);
 
             if (!resp.IsSuccessStatusCode)
+            {
+                CountDeclaredBody(resp);
                 return new ManifestOutcome(false, false, null, null, $"manifest HTTP {(int)resp.StatusCode}", version);
+            }
 
             var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
-            // 清单也要计入"这次更新花了多少带宽"：它每次都要下（除非 304），
-            // 小增量里它占比很可观（1.3 MB vs 几 MB）。注意主机若自己做了 Content-Encoding，
-            // 这里计到的是**解压后**的字节（§2.2 的口径说明见 AGENT.md）。
-            Interlocked.Add(ref _wire, bytes.Length);
+            // 清单也要计入：它每次都要下（除非 304），小增量里占比很可观。
+            // 注意：主机若自己做了 Content-Encoding，这里计到的是**解压后**的长度。
+            Interlocked.Add(ref _payload, bytes.Length);
             return new ManifestOutcome(true, false, bytes, resp.Headers.ETag?.Tag, string.Empty, version);
         }
         catch (Exception ex)
@@ -99,7 +112,15 @@ internal sealed class HttpFetcher : IDisposable
     public async Task<DownloadOutcome> DownloadAsync(string url, string destPath, CancellationToken ct)
     {
         var partPath = destPath + ".part";
-        var wire = 0L;   // 这一文件真正读下网线的字节（含重试、含续传前那半截）
+        var bodyRead = 0L;        // 这一文件从正文流里读到的字节（含重试、含续传的各段）
+        var noProgress = false;   // 上一轮一个字节都没落地
+
+        // 记账：无论成功、重试耗尽还是部分落地，读到的字节都算进会话 Payload（只记一次）
+        DownloadOutcome Done(DownloadOutcome o)
+        {
+            if (o.PayloadBytes > 0) Interlocked.Add(ref _payload, o.PayloadBytes);
+            return o;
+        }
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
@@ -107,13 +128,26 @@ internal sealed class HttpFetcher : IDisposable
 
             var existing = Fs.Exists(partPath) ? Fs.Length(partPath) : 0;
 
+            // 续传策略（I-1）：
+            //  - 本地已有字节 → Range: bytes=existing-（老行为）；
+            //  - 本地 0 字节，但上一轮**一个字节都没落地** → 仍显式发 Range: bytes=0-。
+            //    为什么：真实链路（尤其 TLS）上小响应可能整块缓冲在传输层，连接截断的异常
+            //    先于任何字节交给读循环 → .part 还是 0 → 老逻辑不发 Range → 每轮都从头 GET，
+            //    3 次重试全烧在同一个坑里，最后报"下载失败"。
+            //    bytes=0- 对正常服务端只是"要全量"（回 206 + 完整正文），
+            //    但对"只在非 Range 请求上出错"的中间设备是**另一条路**，于是一次重试才真的
+            //    是另一次尝试，而不是把第一次原样重放。
+            var useRange = existing > 0 || noProgress;
+            noProgress = false;
+            var progressed = false;   // 本轮有没有真的落地字节（catch 里要用，所以声明在 try 外）
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(HeadersTimeout);   // 建连 + 响应头；正文阶段会换成停滞看门狗
 
             try
             {
                 using var req = NewRequest(url);
-                if (existing > 0)
+                if (useRange)
                 {
                     req.Headers.Range = new RangeHeaderValue(existing, null);
 
@@ -128,7 +162,12 @@ internal sealed class HttpFetcher : IDisposable
                     .ConfigureAwait(false);
 
                 if (resp.StatusCode == HttpStatusCode.NotFound)
-                    return new DownloadOutcome(false, 404, 0, UpdateReasons.NoPatch);
+                {
+                    // 又一次"探空补丁"：这是**正常路径**（服务端会主动弃用比目标还大的补丁），
+                    // 但它的错误页正文是真金白银 —— 实测 CF 上每次 28,455 B、占一次更新流量的 10%。
+                    CountDeclaredBody(resp);
+                    return Done(new DownloadOutcome(false, 404, 0, UpdateReasons.NoPatch, bodyRead));
+                }
 
                 if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
                 {
@@ -143,8 +182,9 @@ internal sealed class HttpFetcher : IDisposable
 
                     // 确定性的拒绝不该重试：403/404/410 再问三遍还是同一个答案，
                     // 只会让用户多等一个来回。由调用方决定回落（下个源 / 完整下载）。
+                    CountDeclaredBody(resp);
                     if (attempt == 3 || code is 403 or 404 or 410)
-                        return new DownloadOutcome(false, code, 0, $"HTTP {code}");
+                        return Done(new DownloadOutcome(false, code, 0, $"HTTP {code}", bodyRead));
 
                     await Task.Delay(Backoff(attempt), ct).ConfigureAwait(false);
                     continue;
@@ -160,7 +200,13 @@ internal sealed class HttpFetcher : IDisposable
                 cts.CancelAfter(HeadersTimeout);
 
                 var append = existing > 0 && resp.StatusCode == HttpStatusCode.PartialContent;
-                long written = append ? existing : 0;
+                var baseLen = append ? existing : 0;
+                long written = baseLen;
+
+                // 服务端声明的正文长度（206 时是"剩余"长度）。注意：handler 自动解压时
+                // .NET 会把这个头去掉（值变 null），所以压缩响应天然跳过下面的长度核对。
+                var declared = resp.Content.Headers.ContentLength;
+
                 var lastArm = Stopwatch.GetTimestamp();
                 cts.CancelAfter(StallTimeout);   // 进入正文读取，换成停滞看门狗
 
@@ -173,7 +219,8 @@ internal sealed class HttpFetcher : IDisposable
                     {
                         await fs.WriteAsync(buffer.AsMemory(0, read), cts.Token).ConfigureAwait(false);
                         written += read;
-                        wire += read;
+                        bodyRead += read;
+                        progressed = true;
 
                         // 重新上弦：每 2 秒最多一次，避免每个 64KB 都动一次定时器
                         if (Stopwatch.GetElapsedTime(lastArm) > ReArmInterval)
@@ -184,9 +231,21 @@ internal sealed class HttpFetcher : IDisposable
                     }
                 }
 
+                // 「干净关闭式」截断：服务端声明了长度，却提前把连接关掉 —— 这类响应看着像成功，
+                // 其实少了尾巴。必须当失败，**且保留 .part**（已收到的字节是真字节，下一轮续传接着要）。
+                // 不这么做的后果是静默产出一个坏文件，直到 §4.3⑥ 校验才炸，白下一遍。
+                if (declared is >= 0 && written < baseLen + declared.Value)
+                {
+                    if (!progressed) noProgress = true;   // 一个字节都没落地 → 下轮显式 bytes=0-
+                    if (attempt == 3)
+                        return Done(new DownloadOutcome(false, 0, written, "响应被截断（长度不足）", bodyRead));
+
+                    await Task.Delay(Backoff(attempt), ct).ConfigureAwait(false);
+                    continue;
+                }
+
                 Fs.Move(partPath, destPath, overwrite: true);
-                Interlocked.Add(ref _wire, wire);
-                return new DownloadOutcome(true, 200, written, string.Empty, wire);
+                return Done(new DownloadOutcome(true, 200, written, string.Empty, bodyRead));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -194,12 +253,15 @@ internal sealed class HttpFetcher : IDisposable
             }
             catch (Exception ex)
             {
-                if (attempt == 3) return new DownloadOutcome(false, 0, 0, ex.Message);
+                // 一个字节都没读到（TLS 上小响应被整块缓冲时就是这种）：下一轮改用显式 Range
+                if (!progressed) noProgress = true;
+
+                if (attempt == 3) return Done(new DownloadOutcome(false, 0, 0, ex.Message, bodyRead));
                 await Task.Delay(Backoff(attempt), ct).ConfigureAwait(false);
             }
         }
 
-        return new DownloadOutcome(false, 0, 0, "下载重试超限");
+        return Done(new DownloadOutcome(false, 0, 0, "下载重试超限", bodyRead));
     }
 
     /// <summary>指数退避：300ms → 600ms（§4.6「重试：指数退避、上限 2–3 次」）。</summary>
