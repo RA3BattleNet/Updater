@@ -57,7 +57,7 @@ public static class ManifestGenerator
             var fileName = Path.GetFileName(full);
             var relativeDir = RelativeDir(basePath, Path.GetDirectoryName(full)!);
 
-            var file = new ManifestFile(Guid.NewGuid(), fileName, Md5File(full), relativeDir, "1.0.0");
+            var file = new ManifestFile(DeterministicUuid(relativeDir, fileName), fileName, Md5File(full), relativeDir, "1.0.0");
 
             var byPath = oldFiles.FirstOrDefault(o => o.FileName == fileName && o.Path == relativeDir);
             if (byPath is not null)
@@ -200,6 +200,17 @@ public static class ManifestGenerator
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 新文件的 UUID 由**相对路径**确定性派生（与内容无关）：
+    /// 同一份目录树重复生成清单必须得到同样的 UUID（AGENT.md §5.1 可复现）。
+    /// 内容变化不影响身份；改名靠继承（先按 (FileName,Path)，再按 MD5）保留旧 UUID。
+    /// </summary>
+    private static Guid DeterministicUuid(string relativeDir, string fileName)
+    {
+        var rel = (relativeDir.TrimStart('\\', '/').Replace('\\', '/') + "/" + fileName).ToLowerInvariant();
+        return new Guid(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(rel)));
     }
 
     private static string Md5File(string path)

@@ -91,6 +91,7 @@ public class EndToEndTests
         Assert.Equal(UpdateOutcome.UpToDate, again.Outcome);
         Assert.Equal(0, again.BytesDownloaded);
         Assert.True(http.NotModified >= 1, "第二次应当命中 If-None-Match 304");
+        Assert.Contains("gzip", http.LastAcceptEncoding ?? string.Empty);   // 客户端开启透明压缩（§4.6）
         Assert.True(http.Requests - before <= 2);
     }
 

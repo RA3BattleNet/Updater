@@ -15,6 +15,9 @@ public sealed class Updater
     private readonly UpdateConfig _cfg;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _blobLocks = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>本会话的 HTTP 客户端，仅用于把请求数写进日志（一次只跑一个会话）。</summary>
+    private HttpFetcher? _fetcher;
+
 
 
 
@@ -72,6 +75,7 @@ public sealed class Updater
         var etag = Fs.Exists(etagPath) ? Fs.ReadAllText(etagPath).Trim() : null;
 
         using var fetcher = new HttpFetcher(_cfg.MaxConcurrency);
+        _fetcher = fetcher;
 
         progress?.Report(new UpdateProgress(0, 0, string.Empty, UpdateStage.Check));
 
@@ -86,10 +90,15 @@ public sealed class Updater
         var remoteHash = Hashing.Md5(remoteBytes);
         tally.ManifestHash = remoteHash;
         Fs.WriteAllBytes(remotePath, remoteBytes);
-        if (!string.IsNullOrEmpty(manifest.ETag)) Fs.WriteAllText(etagPath, manifest.ETag!);
 
+        // ETag 只能在「本地清单确实等于远端清单」之后才写：
+        // 它表达的是"我的本地状态对应哪一版远端清单"。提前写会让下一次运行
+        // 凭 If-None-Match 拿到 304，从而误判"已最新"（而本地其实还没更新）。
         if (localHash is not null && string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
+        {
+            SaveEtag(etagPath, manifest.ETag);
             return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
+        }
 
         ManifestModel remote;
         try
@@ -181,48 +190,53 @@ public sealed class Updater
         var totalWork = pending.Count;
         var done = 0;
 
-        using var gate = new SemaphoreSlim(Math.Max(1, _cfg.MaxConcurrency));
-
-        var tasks = pending.Select(async entry =>
+        async Task ProcessOneAsync(PlanEntry entry)
         {
-            await gate.WaitAsync(ct).ConfigureAwait(false);
-            try
+            var t0 = Stopwatch.GetTimestamp();
+            var (action, status, reason, bytes) = await ProcessEntryAsync(entry, fetcher, cacheDir, ct)
+                .ConfigureAwait(false);
+            var ms = (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+
+            Interlocked.Add(ref tally.Bytes, bytes);
+            switch (action)
             {
-                var t0 = Stopwatch.GetTimestamp();
-                var (action, status, reason, bytes) = await ProcessEntryAsync(entry, fetcher, cacheDir, ct)
-                    .ConfigureAwait(false);
-                var ms = (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
-
-                Interlocked.Add(ref tally.Bytes, bytes);
-                switch (action)
-                {
-                    case PlanAction.Move: Interlocked.Increment(ref tally.Move); break;
-                    case PlanAction.Patch: Interlocked.Increment(ref tally.Patch); break;
-                    default: Interlocked.Increment(ref tally.Full); break;
-                }
-
-                if (status != LogStatus.Ok) Interlocked.Increment(ref tally.Fail);
-
-                log.File(entry.Target.UUID.ToString("N"), entry.PredecessorHash, entry.PredecessorPath,
-                    entry.Target.MD5, entry.TargetPath, ActionName(action), status, reason, bytes, ms);
-
-                var n = Interlocked.Increment(ref done);
-                progress?.Report(new UpdateProgress(n, totalWork, entry.Target.FileName, ActionName(action)));
+                case PlanAction.Move: Interlocked.Increment(ref tally.Move); break;
+                case PlanAction.Patch: Interlocked.Increment(ref tally.Patch); break;
+                default: Interlocked.Increment(ref tally.Full); break;
             }
-            catch (OperationCanceledException)
-            {
-                Interlocked.Increment(ref tally.Fail);
-                throw;
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }).ToList();
+
+            if (status != LogStatus.Ok) Interlocked.Increment(ref tally.Fail);
+
+            log.File(entry.Target.UUID.ToString("N"), entry.PredecessorHash, entry.PredecessorPath,
+                entry.Target.MD5, entry.TargetPath, ActionName(action), status, reason, bytes, ms);
+
+            var n = Interlocked.Increment(ref done);
+            progress?.Report(new UpdateProgress(n, totalWork, entry.Target.FileName, ActionName(action)));
+        }
+
+        // 自适应并发（§4.6）：起始 2；一批全成功就 +1 到上限，本批出现失败就回退一步。
+        // 面对受限源站时，这比固定高并发克制得多。
+        var maxConcurrency = Math.Max(UpdateConfig.StartConcurrency, _cfg.MaxConcurrency);
+        var target = Math.Min(UpdateConfig.StartConcurrency, maxConcurrency);
+        var cursor = 0;
 
         try
         {
-            await Task.WhenAll(tasks);
+            while (cursor < pending.Count)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var wave = pending.GetRange(cursor, Math.Min(target, pending.Count - cursor));
+                cursor += wave.Count;
+
+                var failuresBefore = Volatile.Read(ref tally.Fail);
+                await Task.WhenAll(wave.Select(ProcessOneAsync)).ConfigureAwait(false);
+                var failedInWave = Volatile.Read(ref tally.Fail) - failuresBefore;
+
+                target = failedInWave > 0
+                    ? Math.Max(UpdateConfig.StartConcurrency, target - 1)
+                    : Math.Min(maxConcurrency, target + 1);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -235,6 +249,7 @@ public sealed class Updater
             var tmp = localManifestPath + ".tmp";
             Fs.WriteAllBytes(tmp, remoteBytes);
             Fs.Place(tmp, localManifestPath);
+            SaveEtag(etagPath, manifest.ETag);
             return Finish(log, tally, sw, UpdateOutcome.Updated, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
         }
 
@@ -361,14 +376,14 @@ public sealed class Updater
         return (PlanAction.Full, LogStatus.Ok, reason, bytes);
     }
 
-    /// <summary>按主地址 + 备用地址顺序取资源（§4.6 多源回退）。</summary>
+    /// <summary>按主地址 + 备用地址顺序取资源（§4.6 多源回退）。404 也继续试下一个源 —— 配了备用源就意味着"同一份内容可能只在其中一个源上"。</summary>
     private async Task<DownloadOutcome> FetchAsync(HttpFetcher fetcher, string relative, string dest, CancellationToken ct)
     {
         var last = new DownloadOutcome(false, 0, 0, "没有可用的基准地址");
         foreach (var baseUrl in BaseUrls())
         {
             last = await fetcher.DownloadAsync(baseUrl + relative, dest, ct).ConfigureAwait(false);
-            if (last.Ok || last.StatusCode == 404) return last;
+            if (last.Ok) return last;
             if (ct.IsCancellationRequested) return last;
         }
 
@@ -386,9 +401,15 @@ public sealed class Updater
     {
         sw.Stop();
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
-            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString());
+            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0);
 
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed, detail, httpVersion);
+    }
+
+    private static void SaveEtag(string etagPath, string? etag)
+    {
+        if (string.IsNullOrEmpty(etag)) return;
+        Fs.WriteAllText(etagPath, etag!);
     }
 
     private static string ActionName(PlanAction action) => action switch

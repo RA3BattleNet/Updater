@@ -26,7 +26,10 @@ public sealed record UpdateConfig
     /// <summary>备用资源根地址；主地址失败时按顺序回退（AGENT.md §4.6）。</summary>
     public IReadOnlyList<string> FallbackBaseUrls { get; init; } = [];
 
-    /// <summary>并发下载上限（AGENT.md §4.6：2 起、上限 4）。</summary>
+    /// <summary>自适应并发的**起始值**（AGENT.md §4.6：2 起）。</summary>
+    public const int StartConcurrency = 2;
+
+    /// <summary>并发下载**上限**（AGENT.md §4.6：全成功则逐步加到该值，出现失败就回退到起始值）。</summary>
     public int MaxConcurrency { get; init; } = 4;
 
     /// <summary>

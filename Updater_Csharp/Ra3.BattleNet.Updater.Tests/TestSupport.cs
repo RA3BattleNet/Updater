@@ -97,3 +97,13 @@ internal static class TestSupport
         return body + marker;
     }
 }
+
+/// <summary>同步执行的 IProgress：默认的 Progress&lt;T&gt; 会把回调投到线程池，取消时机不可控。</summary>
+internal sealed class SyncProgress<T> : IProgress<T>
+{
+    private readonly Action<T> _action;
+
+    public SyncProgress(Action<T> action) => _action = action;
+
+    public void Report(T value) => _action(value);
+}

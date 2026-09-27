@@ -55,9 +55,10 @@ internal sealed class UpdateLog : IDisposable
     /// <summary>每轮一行（收尾）。result 是增量命中率与节省量的唯一现场证据。</summary>
     public void Run(
         string manifestHash, int total, int skip, int move, int patch, int full, int fail,
-        long bytes, long ms, string result)
+        long bytes, long ms, string result, long requests = 0)
     {
-        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}");
+        // requests 是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）
+        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}");
     }
 
     private void Write(string line)

@@ -98,4 +98,32 @@ public class PatchGenerationTests
         Assert.Equal(0, summary.PatchesCreated);
         Assert.Empty(Directory.GetFiles(Path.Combine(server, "patches")));
     }
+    [Fact]
+    public void Prune_KeepsOnlyPatchesImpliedByGivenBaselines()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+        var v3 = tmp.Sub("v3");
+        TestSupport.WriteTree(v1, ("a.bin", TestSupport.Big("ONE")));
+        TestSupport.WriteTree(v2, ("a.bin", TestSupport.Big("TWO")));
+        TestSupport.WriteTree(v3, ("a.bin", TestSupport.Big("THREE")));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        var m2 = Path.Combine(tmp.Path, "v2.xml");
+        var m3 = Path.Combine(tmp.Path, "v3.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+        ManifestGenerator.Generate(v2, m1, [], oldRoot: v1).Manifest.SaveToXml(m2);
+        ManifestGenerator.Generate(v3, m2, [], oldRoot: v2).Manifest.SaveToXml(m3);
+
+        var server = tmp.Sub("server");
+        PatchGenerator.Generate(m3, v3, [new Baseline(m1, v1), new Baseline(m2, v2)], server, minFileSize: 0);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(server, "patches")).Length);
+
+        // 只保留"最近 1 个基线"能推导出的补丁
+        var summary = PatchGenerator.Generate(m3, v3, [new Baseline(m2, v2)], server, minFileSize: 0, prune: true);
+
+        Assert.Equal(1, summary.PatchesPruned);
+        Assert.Single(Directory.GetFiles(Path.Combine(server, "patches")));
+    }
 }

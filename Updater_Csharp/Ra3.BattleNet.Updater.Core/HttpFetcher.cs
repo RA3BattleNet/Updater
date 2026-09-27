@@ -17,6 +17,11 @@ internal sealed class HttpFetcher : IDisposable
 {
     private readonly HttpClient _http;
 
+    private int _requests;
+
+    /// <summary>本会话发起的 HTTP 请求数（AGENT.md F8：请求数必须可观测）。</summary>
+    public int Requests => Volatile.Read(ref _requests);
+
     public HttpFetcher(int maxConcurrency)
     {
         var handler = new SocketsHttpHandler
@@ -35,6 +40,8 @@ internal sealed class HttpFetcher : IDisposable
     /// <summary>取远端 manifest；带 If-None-Match 时命中即 304（零正文）。</summary>
     public async Task<ManifestOutcome> GetManifestAsync(string url, string? etag, CancellationToken ct)
     {
+        Interlocked.Increment(ref _requests);
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(30));
 
@@ -72,6 +79,8 @@ internal sealed class HttpFetcher : IDisposable
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
+            Interlocked.Increment(ref _requests);
+
             var existing = Fs.Exists(partPath) ? Fs.Length(partPath) : 0;
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

@@ -28,6 +28,9 @@ internal sealed class TestHttpServer : IDisposable
 
     public int NotModified => Volatile.Read(ref _notModified);
 
+    /// <summary>最近一次请求的 Accept-Encoding，用于验证客户端确实开启了透明压缩。</summary>
+    public string? LastAcceptEncoding { get; private set; }
+
     public TestHttpServer(string root)
     {
         _root = Path.GetFullPath(root);
@@ -74,7 +77,8 @@ internal sealed class TestHttpServer : IDisposable
                 var name = header[..idx].Trim();
                 var value = header[(idx + 1)..].Trim();
 
-                if (name.Equals("If-None-Match", StringComparison.OrdinalIgnoreCase)) ifNoneMatch = value;
+                if (name.Equals("Accept-Encoding", StringComparison.OrdinalIgnoreCase)) LastAcceptEncoding = value;
+                else if (name.Equals("If-None-Match", StringComparison.OrdinalIgnoreCase)) ifNoneMatch = value;
                 else if (name.Equals("Range", StringComparison.OrdinalIgnoreCase)) range = value;
             }
 
