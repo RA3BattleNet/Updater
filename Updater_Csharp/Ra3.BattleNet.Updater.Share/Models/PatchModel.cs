@@ -25,10 +25,11 @@ namespace Ra3.BattleNet.Updater.Share.Models
     }
 
     // 补丁清单模型
+    // 【2026-09-28】删掉 BaseVersion / TargetVersion：它们**写而不读**
+    // （生成端填的是清单根版本、恒 "1.0.0"；应用端只遍历 Operations）。
+    // 反序列化容忍未知字段，所以老包里带着这两个键也照样能读。
     public class PatchManifest
     {
-        public string? BaseVersion { get; set; }
-        public string? TargetVersion { get; set; }
         public List<OperationInfo>? Operations { get; set; }
     }
 

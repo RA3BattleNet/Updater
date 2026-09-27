@@ -1,6 +1,4 @@
 {
-  "BaseVersion": "1.0.1",
-  "TargetVersion": "1.0.1",
   "Operations": [
     {
       "Type": "patch",

@@ -162,8 +162,6 @@ namespace Ra3.BattleNet.Updater.Server
 
             var patchManifest = new PatchManifest
             {
-                BaseVersion = newManifest.Version.ToString(),
-                TargetVersion = newManifest.Version.ToString(),
                 Operations = operations.Select(op => new OperationInfo
                 {
                     Type = op.Type.ToString().ToLowerInvariant(),
