@@ -26,7 +26,6 @@
 
 - **[Updater_Csharp/README.md](./Updater_Csharp/README.md)** —— 使用说明（怎么引用、怎么调、返回什么、怎么处理、怎么发布）。
 - `Updater_Csharp/*/README.md` —— 各子项目参数与取舍细节。
-- `AGENT.md` —— 设计规范（甲方要求，**本地文档、不入库**）。
 
 ## 快速开始
 

@@ -1,7 +1,6 @@
 # Ra3.BattleNet.Updater —— 使用说明
 
 > 面向**引用本库的开发者**：怎么接、怎么用、会拿到什么、该怎么处理。
-> 设计规范（甲方要求）在仓库根目录的 `AGENT.md`（本地文档，不入库）。
 > 子项目参数细节见同目录下各自的 README：
 > `Ra3.BattleNet.Updater.XmlGenerator/README.md`（清单生成 + UUID 关联规则）、
 > `Ra3.BattleNet.Updater.Server.PatchGenerator/README.md`（补丁参数与取舍）。
@@ -188,14 +187,17 @@ rclone copyto <服务端目录>/manifest.xml <远端>/manifest.xml
       <FileName>a.dll</FileName>
       <MD5>…</MD5>
       <Path>\bin\</Path>
-      <Version>1.0.0</Version>       <!-- 历史字段，无判断价值 -->
-      <Type>Bin</Type>               <!-- 历史字段（Bin/Text），无判断价值 -->
-      <Mode>Auto</Mode>              <!-- Auto/Force/Skip：**Skip 生效**（不更新） -->
-      <KindOf>NULL</KindOf>          <!-- 历史字段，无判断价值 -->
+      <Mode>Auto</Mode>              <!-- Auto/Force/Skip：**Skip 生效**（该文件永不参与更新） -->
     </File>
   </Manifest>
 </Metadata>
 ```
+
+> **文件级 `Version` / `Type` / `KindOf` 已剔除（2026-09-28）**：三者都没有判断价值
+> （客户端从不读、生成器只是搬运；官方清单实测 `Type` 恒为 `Bin`、`KindOf` 恒为 `NULL`、
+> 文件级 `Version` 只有 3 个"哪次生成器跑出来的"残留值）。清单**根节点**的 `Version`
+> （格式版本，属性形式）保留，`Mode` 保留。
+> **读端仍能读老清单**：官方与历史清单里带着这三个元素时**一律忽略**，不会因此失败。
 
 客户端逐文件决策（**身份只看 UUID**，不按路径猜）：
 

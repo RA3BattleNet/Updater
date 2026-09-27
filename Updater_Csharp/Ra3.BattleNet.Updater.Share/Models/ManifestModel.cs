@@ -5,7 +5,6 @@ using System.Xml;
 
 namespace Ra3.BattleNet.Updater.Share.Models
 {
-    public enum FileTypeEnum { Bin = 0, Text = 1 }
     public enum FileModeEnum { Auto = 0, Force = 1, Skip = 2 }
     /// <summary>
     /// 表示整个清单文件的根对象
@@ -163,10 +162,7 @@ namespace Ra3.BattleNet.Updater.Share.Models
                 AddChildNode(xmlDoc, fileNode, "FileName", file.FileName);
                 AddChildNode(xmlDoc, fileNode, "MD5", file.MD5);
                 AddChildNode(xmlDoc, fileNode, "Path", file.Path);
-                AddChildNode(xmlDoc, fileNode, "Version", file.Version.ToString());
-                AddChildNode(xmlDoc, fileNode, "Type", file.Type.ToString());
                 AddChildNode(xmlDoc, fileNode, "Mode", file.Mode.ToString());
-                AddChildNode(xmlDoc, fileNode, "KindOf", file.KindOf);
                 manifestNode.AppendChild(fileNode);
             }
             metadataNode.AppendChild(manifestNode);
@@ -284,14 +280,14 @@ namespace Ra3.BattleNet.Updater.Share.Models
                         Logger.Debug($"{item.OuterXml}{Environment.NewLine}");
                         continue;
                     }
+                    // 只读**有判断价值**的字段（UUID/FileName/MD5/Path/Mode）。
+                    // 老清单里可能还有 <Version>/<Type>/<KindOf> —— 它们是历史遗留、无人读，
+                    // 这里**直接忽略**（不多看一眼），于是新旧清单都能读。
                     ManifestFile temp = new ManifestFile(tempuuid,
                         item["FileName"].InnerText,
                         item["MD5"].InnerText,
                         item["Path"].InnerText,
-                        item["Version"].InnerText,
-                        (FileTypeEnum)Enum.Parse(typeof(FileTypeEnum),item["Type"].InnerText),
-                        (FileModeEnum)Enum.Parse(typeof(FileModeEnum), item["Mode"].InnerText),
-                        item["KindOf"].InnerText);
+                        (FileModeEnum)Enum.Parse(typeof(FileModeEnum), item["Mode"].InnerText));
                     Files.Add(temp);
                 }
             }
@@ -342,30 +338,19 @@ namespace Ra3.BattleNet.Updater.Share.Models
         public string Path { get; set; }
 
         /// <summary>
-        /// 文件版本
-        /// </summary>
-        [Required]
-        public Version Version { get; set; }
-
-        /// <summary>
-        /// 文件类型 (0:Bin, 1:Text)
-        /// </summary>
-        public FileTypeEnum Type { get; set; } = FileTypeEnum.Bin;
-
-        /// <summary>
-        /// 程序处理模式 (0:Auto, 1:Force, 2:Skip)
+        /// 程序处理模式 (0:Auto, 1:Force, 2:Skip)。**只有 Skip 被实现**（该文件永不参与更新）。
         /// </summary>
         public FileModeEnum Mode { get; set; } = FileModeEnum.Auto;
 
         /// <summary>
-        /// 文件种类标识 (例如 "APPLICATION;PROGRAM;")
+        /// 快速初始化。
+        /// 【2026-09-28 决定】文件级 <c>Version</c> / <c>Type</c> / <c>KindOf</c> 已**剔除**：
+        /// 三者都没有判断价值（客户端从不读、生成器只是搬运），官方清单实测 <c>Type</c> 恒为 Bin、
+        /// <c>KindOf</c> 恒为 NULL、文件级 <c>Version</c> 只有 3 个"哪次生成器跑出来的"残留值 ——
+        /// 留着只会制造"看起来有意义"的假信息。清单根节点的 <c>Version</c>（格式版本）保留。
+        /// 读端对老清单里的这三个元素**一律忽略**。
         /// </summary>
-        public string KindOf { get; set; } = string.Empty;
-
-        /// <summary>
-        /// 快速初始化
-        /// </summary>
-        public ManifestFile(Guid _uuid, string _filename, string _md5, string _path, string _version, FileTypeEnum _type = FileTypeEnum.Bin, FileModeEnum _mode = FileModeEnum.Auto, string _kingof = "NULL")
+        public ManifestFile(Guid _uuid, string _filename, string _md5, string _path, FileModeEnum _mode = FileModeEnum.Auto)
         {
             if (_uuid == Guid.Empty)
                 throw new ArgumentException("UUID 不能为空", nameof(_uuid));
@@ -387,10 +372,7 @@ namespace Ra3.BattleNet.Updater.Share.Models
             FileName = _filename;
             MD5 = _md5;
             Path = _path;
-            Version = new Version(_version);
-            Type = _type;
             Mode = _mode;
-            KindOf = _kingof;
         }
     }
 

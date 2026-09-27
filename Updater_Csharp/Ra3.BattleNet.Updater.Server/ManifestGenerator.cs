@@ -104,7 +104,7 @@ public static class ManifestGenerator
             var fileName = Path.GetFileName(full);
             var relativeDir = RelativeDir(basePath, Path.GetDirectoryName(full)!);
 
-            var file = new ManifestFile(DeterministicUuid(relativeDir, fileName), fileName, Md5File(full), relativeDir, "1.0.0");
+            var file = new ManifestFile(DeterministicUuid(relativeDir, fileName), fileName, Md5File(full), relativeDir);
 
             var byPath = oldFiles.FirstOrDefault(o => o.FileName == fileName && o.Path == relativeDir);
             if (byPath is not null)
@@ -154,13 +154,15 @@ public static class ManifestGenerator
             manifest, added, removed, modified, moved, unchanged, suspects, candidates, probed, linked);
     }
 
+    /// <summary>
+    /// 从旧条目继承**有判断价值**的东西：身份（UUID）与处理模式。
+    /// 【2026-09-28 决定】文件级 <c>Version</c>（原来是"复制 + Build+1"）、<c>Type</c>、<c>KindOf</c>
+    /// 已剔除：它们没有任何判断价值，其中 Version 的 Build+1 还在**主动制造假语义**（每次生成都像新版本）。
+    /// </summary>
     private static void Inherit(ManifestFile target, ManifestFile source)
     {
         target.UUID = source.UUID;
-        target.Version = new Version(source.Version.Major, source.Version.Minor, source.Version.Build + 1);
-        target.Type = source.Type;
         target.Mode = source.Mode;
-        target.KindOf = source.KindOf;
     }
 
     /// <summary>

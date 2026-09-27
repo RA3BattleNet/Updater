@@ -156,6 +156,11 @@ public class VersionMatrixSimulation
     private static Artifacts Capture(string scenario, string expectation, string client, UpdateResult r,
         string comparison, long baselineBytes = 0, string extra = "", long wireBytes = 0)
     {
+        // 上网字节：优先用**测试服务器在网线另一头数出来**的（独立口径）；调用方没量到就退回
+        // 客户端自己的**连接层计数**（`r.WireBytes`，含 TLS/HTTP 头）。两者来源不同，报告里标注清楚。
+        var wireFromServer = wireBytes > 0;
+        if (!wireFromServer) wireBytes = r.WireBytes;
+
         var dir = Path.Combine(LogsDir, scenario);
         Directory.CreateDirectory(dir);
 
@@ -183,7 +188,9 @@ public class VersionMatrixSimulation
         md.AppendLine($"- **实际**：`{r}`");
         md.AppendLine($"- **目录比对**：{comparison}");
         md.AppendLine($"- **HTTP 请求数**（R 行末列）：{requests}");
-        md.AppendLine($"- **上网字节（真的走网线的，压缩后）**：{(wireBytes > 0 ? wireBytes.ToString("N0") : "未记录")}");
+        md.AppendLine($"- **上网字节（真的走网线的）**：{(wireBytes > 0
+            ? $"{wireBytes:N0}（来源：{(wireFromServer ? "测试服务器落地点计数" : "客户端连接层计数")}）"
+            : "未记录")}");
         md.AppendLine($"- **下载字节（内容字节，解压后）**：{r.BytesDownloaded:N0}" +
                       (baselineBytes > 0
                           ? $"；只下变更文件的基线 {baselineBytes:N0} → 节省 {saved:P1}"

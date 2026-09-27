@@ -75,8 +75,7 @@ internal static class TestSupport
     {
         var seed = Md5((dir ?? string.Empty).Replace('\\', '/').Trim('/') + "/" + fileName);
         var uuid = new Guid(Convert.FromHexString(seed));
-        var f = new ManifestFile(uuid, fileName, md5, dir, "1.0.0",
-            FileTypeEnum.Bin, mode, "TEST;");
+        var f = new ManifestFile(uuid, fileName, md5, dir, mode);
         m.Manifest.Files.Add(f);
         return f;
     }
