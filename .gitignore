@@ -425,3 +425,5 @@ vcpkg_installed/
 buildtrees/
 downloads/
 packages/
+
+AGENT.md
