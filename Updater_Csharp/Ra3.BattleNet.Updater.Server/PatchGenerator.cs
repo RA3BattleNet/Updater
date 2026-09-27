@@ -100,9 +100,17 @@ public static class PatchGenerator
                     continue;
                 }
 
-                File.Move(tmp, patchPath, overwrite: true);
-                patchBytes += new FileInfo(patchPath).Length;
-                created++;
+                // **后判断**：补丁不比完整文件小就没有意义，直接弃用 → 客户端 404 → 走完整下载
+                if (new FileInfo(tmp).Length >= new FileInfo(newPath).Length)
+                    skipped++;
+                else
+                {
+                    File.Move(tmp, patchPath, overwrite: true);
+                    patchBytes += new FileInfo(patchPath).Length;
+                    created++;
+                }
+
+                if (File.Exists(tmp)) File.Delete(tmp);
             }
         }
 
