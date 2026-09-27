@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 
@@ -16,6 +17,17 @@ internal sealed record ManifestOutcome(bool Ok, bool NotModified, byte[]? Conten
 internal sealed class HttpFetcher : IDisposable
 {
     private readonly HttpClient _http;
+
+    /// <summary>响应头超时：等不到头就是服务端有问题（正文另算，见下）。</summary>
+    private static readonly TimeSpan HeadersTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// 正文**停滞**超时：只要还在收到数据就不算超时（大文件慢链路也不会被掐死），
+    /// 超过这么久一个字节都没动才判失败。这一条与文件大小无关。
+    /// </summary>
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
+
+    private static readonly TimeSpan ReArmInterval = TimeSpan.FromSeconds(2);
 
     private int _requests;
     private long _wire;
@@ -96,7 +108,7 @@ internal sealed class HttpFetcher : IDisposable
             var existing = Fs.Exists(partPath) ? Fs.Length(partPath) : 0;
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromMinutes(10));
+            cts.CancelAfter(HeadersTimeout);   // 建连 + 响应头；正文阶段会换成停滞看门狗
 
             try
             {
@@ -138,19 +150,19 @@ internal sealed class HttpFetcher : IDisposable
                     continue;
                 }
 
-                // 读超时分层：连接超时在 handler 上是 5s，正文读取按大小给预算。
-                // 固定 10 分钟会把大文件掐死（200 MB @ 300 KB/s 就要 11 分钟），
-                // 也会让小文件白等。按声明的 Content-Length 以「64 KB/s 下限速度」折算，
-                // 上限 30 分钟；拿不到长度时退回 10 分钟。
-                var declared = resp.Content.Headers.ContentLength;
-                var budget = declared is > 0
-                    ? TimeSpan.FromSeconds(60 + declared.Value / (64.0 * 1024))
-                    : TimeSpan.FromMinutes(10);
-                if (budget > TimeSpan.FromMinutes(30)) budget = TimeSpan.FromMinutes(30);
-                cts.CancelAfter(budget);
+                // 超时分层（§4.6）：
+                //  - 连接：handler 上 5s；
+                //  - 响应头：60s（等不到头就是服务端有问题）；
+                //  - 正文：**停滞超时**，不是"总预算"。总预算式超时按大小折算是错的 ——
+                //    5.6 GB 的 ISO 在 10 Mbps 上要 75 分钟，任何合理上限都会把它掐死；
+                //    而"卡住不动"才是真异常。所以每读到数据就把看门狗重新上弦。
+                //    整体上限交给会话级 SessionTimeout（§4.6「整体有时限」）。
+                cts.CancelAfter(HeadersTimeout);
 
                 var append = existing > 0 && resp.StatusCode == HttpStatusCode.PartialContent;
                 long written = append ? existing : 0;
+                var lastArm = Stopwatch.GetTimestamp();
+                cts.CancelAfter(StallTimeout);   // 进入正文读取，换成停滞看门狗
 
                 using (var fs = Fs.OpenWrite(partPath, append))
                 using (var src = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false))
@@ -162,6 +174,13 @@ internal sealed class HttpFetcher : IDisposable
                         await fs.WriteAsync(buffer.AsMemory(0, read), cts.Token).ConfigureAwait(false);
                         written += read;
                         wire += read;
+
+                        // 重新上弦：每 2 秒最多一次，避免每个 64KB 都动一次定时器
+                        if (Stopwatch.GetElapsedTime(lastArm) > ReArmInterval)
+                        {
+                            cts.CancelAfter(StallTimeout);
+                            lastArm = Stopwatch.GetTimestamp();
+                        }
                     }
                 }
 

@@ -61,44 +61,6 @@ internal static class Fs
         if (!string.IsNullOrEmpty(dir)) CreateDirectory(dir);
         Move(tempFile, targetPath, overwrite: true);
     }
-
-    /// <summary>开头是不是 gzip 魔数（1f 8b）—— 判断"落盘的到底压过没有"。</summary>
-    public static bool LooksGzipped(string path)
-    {
-        try
-        {
-            using var s = OpenRead(path);
-            return s.ReadByte() == 0x1F && s.ReadByte() == 0x8B;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// 把 gzip 文件解到 dest（先写临时文件再原子替换）。**失败不留半个目标文件**，返回 false。
-    /// gzip 自带 CRC32 与原始长度，所以"解压能过"就等于"传输完整"（§4.3 ⑥ 的前置）。
-    /// </summary>
-    public static bool TryGunzip(string gzPath, string dest)
-    {
-        var tmp = dest + ".gunzip";
-        try
-        {
-            using (var input = OpenRead(gzPath))
-            using (var gz = new System.IO.Compression.GZipStream(input, System.IO.Compression.CompressionMode.Decompress))
-            using (var output = OpenWrite(tmp, append: false))
-                gz.CopyTo(output, 1 << 16);
-
-            Move(tmp, dest, overwrite: true);
-            return true;
-        }
-        catch
-        {
-            Delete(tmp);
-            return false;
-        }
-    }
 }
 
 /// <summary>内容哈希。协议里只要求 MD5（AGENT.md §3.4）。</summary>

@@ -79,7 +79,6 @@ internal static class Program
         var fallback = new List<string>();
         var concurrency = 4;
         var verifyUnchanged = false;
-        var compressedFiles = true;
         // 保险丝默认**关闭**（AGENT.md §4.4 / Q4）：变更文件多正是增量该发挥作用的场景。
         // 这里原来是 500 / 0.30 —— 等于默认开启，会让"变更文件多"直接被判成需要完整包。
         var thresholdFiles = 0;
@@ -101,7 +100,6 @@ internal static class Program
                 case "--threshold-files": thresholdFiles = int.Parse(Next(args, ref i)); break;
                 case "--threshold-ratio": thresholdRatio = double.Parse(Next(args, ref i)); break;
                 case "--verify-unchanged": verifyUnchanged = true; break;
-                case "--no-compressed-files": compressedFiles = false; break;
                 case "--json": break;
                 case "--help": ShowUsage(); Environment.Exit(0); break;
                 default: throw new ArgumentException($"未知参数：{args[i]}");
@@ -125,7 +123,6 @@ internal static class Program
             FullPackageThresholdFiles = thresholdFiles,
             FullPackageThresholdRatio = thresholdRatio,
             VerifyUnchangedFiles = verifyUnchanged,
-            UseCompressedFiles = compressedFiles,
         };
     }
 
@@ -152,7 +149,6 @@ internal static class Program
         Console.WriteLine("  --threshold-files <N>     待下载文件数阈值（默认 0 = 关闭）");
         Console.WriteLine("  --threshold-ratio <R>     待下载文件数占比阈值（默认 0 = 关闭）");
         Console.WriteLine("  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）");
-        Console.WriteLine("  --no-compressed-files     不优先取 files/{md5}.gz 预压缩变体（默认优先取）");
         Console.WriteLine("  --json                    只输出一行 JSON 结果");
     }
 }

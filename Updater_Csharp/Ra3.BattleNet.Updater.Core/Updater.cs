@@ -18,11 +18,7 @@ public sealed class Updater
     /// <summary>本会话的 HTTP 客户端，仅用于把请求数写进日志（一次只跑一个会话）。</summary>
     private HttpFetcher? _fetcher;
 
-    /// <summary>
-    /// 服务端到底有没有 <c>files/{md5}.gz</c> 预压缩变体：null = 还不知道（第一次去试），
-    /// true/false = 本会话的结论。整个会话只探测一次，不给 C8 的请求数添负担。
-    /// </summary>
-    private bool? _packedVariant;
+
 
 
 
@@ -391,9 +387,11 @@ public sealed class Updater
     }
 
     /// <summary>
-    /// 完整下载：优先取服务端的**预压缩变体** `files/{md5}.gz`，取不到再取 `files/{md5}`（§3.2 / §4.6）。
+    /// 完整下载：<c>GET files/{md5}</c>（§3.2）。
     /// 【必须】下载完要**校验**（§4.3 ⑥），而且校验发生在放到目标路径之前 ——
     /// 这是唯一能挡住"传完了但内容是坏的"（代理返回垃圾、传输被截断…）的一步。
+    /// 注意：**不访问** <c>files/{md5}.gz</c> 预压缩旁挂 —— 那条路已按决策移除（见 AGENT.md §4.6），
+    /// 服务端仍可生成旁挂（默认关闭），将来要消费它时按规范里的协议重新实现。
     /// </summary>
     private async Task<(PlanAction Action, int Status, string Reason, long Bytes, long Wire)> FullAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, string reason, CancellationToken ct)
@@ -408,7 +406,7 @@ public sealed class Updater
             if (!await BlobIsGoodAsync(blob, entry.Target.MD5, ct).ConfigureAwait(false))
             {
                 Fs.Delete(blob);
-                var got = await FetchFullAsync(fetcher, entry.Target.MD5, blob, ct).ConfigureAwait(false);
+                var got = await FetchAsync(fetcher, "files/" + entry.Target.MD5, blob, ct).ConfigureAwait(false);
                 if (!got.Ok)
                     return (PlanAction.Full, LogStatus.RetryExceeded, UpdateReasons.DownloadFailed, 0, got.WireBytes);
 
@@ -442,76 +440,6 @@ public sealed class Updater
     private static async Task<bool> BlobIsGoodAsync(string blob, string expectedMd5, CancellationToken ct) =>
         Fs.Exists(blob)
         && string.Equals(await Hashing.Md5FileAsync(blob, ct).ConfigureAwait(false), expectedMd5, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// 取一个完整文件，**返回 Ok 即保证 <paramref name="blob"/> 的内容等于 <paramref name="md5"/>**
-    /// （§4.3 ⑥：完整下载之后必须校验，且校验发生在放到目标路径之前）。
-    ///
-    /// 顺序：先试预压缩变体 <c>files/{md5}.gz</c>，拿到的字节按下面三条判断 ——
-    /// **不靠猜魔数、靠验哈希**：
-    /// <list type="number">
-    /// <item>字节本身就已经等于目标内容（主机按 <c>Content-Encoding</c> 替我们解过了）→ 直接用；</item>
-    /// <item>是完整的 gzip 流 → 解压，再验；</item>
-    /// <item>都不是（对象损坏、是个拦路 HTML…）→ 删掉，**本会话不再信任压缩变体**，回落原文件。</item>
-    /// </list>
-    /// 服务器没有该变体（404）时同样回落原文件，并记住结论，不让每个文件都去问一次。
-    /// </summary>
-    private async Task<DownloadOutcome> FetchFullAsync(
-        HttpFetcher fetcher, string md5, string blob, CancellationToken ct)
-    {
-        var raw = "files/" + md5;
-        var wire = 0L;
-
-        if (_cfg.UseCompressedFiles && _packedVariant != false)
-        {
-            var gzPath = blob + ".gz";
-            var got = await FetchAsync(fetcher, raw + ".gz", gzPath, ct).ConfigureAwait(false);
-            wire += got.WireBytes;
-
-            if (got.Ok)
-            {
-                // 情况一：拿到的就是目标内容（主机替我们解过了）
-                if (await IsContentAsync(gzPath, md5, ct).ConfigureAwait(false))
-                {
-                    Fs.Move(gzPath, blob, overwrite: true);
-                }
-                // 情况二：是完整的 gzip 流 → 解压再验
-                else if (Fs.LooksGzipped(gzPath) && Fs.TryGunzip(gzPath, blob)
-                         && await IsContentAsync(blob, md5, ct).ConfigureAwait(false))
-                {
-                    Fs.Delete(gzPath);
-                }
-                // 情况三：既不是内容、也不是能解的 gzip → 不信这台服务器的 .gz 了
-                else
-                {
-                    Fs.Delete(gzPath);
-                    Fs.Delete(blob);
-                    _packedVariant = false;
-                    var fallback = await FetchAsync(fetcher, raw, blob, ct).ConfigureAwait(false);
-                    return fallback with { WireBytes = wire + fallback.WireBytes };
-                }
-
-                if (_packedVariant is null) _packedVariant = true;
-                return got with
-                {
-                    Bytes = Fs.Exists(blob) ? Fs.Length(blob) : got.Bytes,
-                    WireBytes = wire,
-                };
-            }
-
-            if (got.StatusCode != 404)
-                return got with { WireBytes = wire };   // 网络层错误：如实上报
-
-            if (_packedVariant is null) _packedVariant = false;   // 服务器没有这套东西，别再问了
-        }
-
-        var rawGot = await FetchAsync(fetcher, raw, blob, ct).ConfigureAwait(false);
-        return rawGot with { WireBytes = wire + rawGot.WireBytes };
-    }
-
-    private static async Task<bool> IsContentAsync(string path, string expectedMd5, CancellationToken ct) =>
-        Fs.Exists(path)
-        && string.Equals(await Hashing.Md5FileAsync(path, ct).ConfigureAwait(false), expectedMd5, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>按主地址 + 备用地址顺序取资源（§4.6 多源回退）。404 也继续试下一个源 —— 配了备用源就意味着"同一份内容可能只在其中一个源上"。</summary>
     private async Task<DownloadOutcome> FetchAsync(HttpFetcher fetcher, string relative, string dest, CancellationToken ct)

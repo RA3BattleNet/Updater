@@ -28,7 +28,9 @@ public static class PatchGenerator
     public const long DefaultMinFileSize = 0;
 
     /// <summary>
-    /// 给 <c>files/{md5}</c> 生成预压缩旁挂 <c>files/{md5}.gz</c>。
+    /// 给 <c>files/{md5}</c> 生成预压缩旁挂 <c>files/{md5}.gz</c>（**可选项，默认关闭**）。
+    /// 客户端目前**不消费**它（见 AGENT.md §4.6）；开启只会有发布期 CPU 与约 +46% 存储的代价。
+    /// 压不动的（小文件/已压过的二进制）不写：小文件 gzip 反而更大，写了纯亏。
     /// 已存在且比原文件小就跳过（幂等：重跑发布流水线不会白压一遍 1 GB）。
     /// **不追求字节确定性**：URL 的键是未压缩内容的 md5，客户端解压后照样校验那个 md5，
     /// 所以换个压缩级别、换个工具版本都不会影响正确性（这点和"把压缩字节当内容身份"完全不同）。
@@ -74,7 +76,7 @@ public static class PatchGenerator
         bool verify = true,
         bool prune = false,
         string? toolsDir = null,
-        bool compressFiles = true)
+        bool compressFiles = false)
     {
         var tools = toolsDir ?? AppContext.BaseDirectory;
         var filesDir = Path.Combine(outputDir, "files");

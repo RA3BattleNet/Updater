@@ -178,8 +178,22 @@ internal sealed class TestHttpServer : IDisposable
                 return;
             }
 
-            var bytes = File.ReadAllBytes(file);
-            var etag = '"' + Convert.ToHexStringLower(MD5.HashData(bytes)) + '"';
+            // 大文件**必须流式**发出：File.ReadAllBytes 遇到 5.6 GB 会直接爆掉
+            //（.NET 单数组上限 ~2 GB），连接被掐断 → 客户端重试后如实报 download_failed。
+            // 这不是产品的限制，是测试服务器的幼稚实现 —— 真实静态服务器/CND 都是流式的。
+            var length = new FileInfo(file).Length;
+
+            // ETag：小文件按内容算（精确）；大文件按 大小+mtime，免得每次请求哈希 5 GB
+            string etag;
+            if (length <= 8L * 1024 * 1024)
+            {
+                using var fs0 = File.OpenRead(file);
+                etag = '"' + Convert.ToHexStringLower(MD5.HashData(fs0)) + '"';
+            }
+            else
+            {
+                etag = $"\"big-{length:x}-{File.GetLastWriteTimeUtc(file).Ticks:x}\"";
+            }
 
             if (ifNoneMatch is not null && ifNoneMatch == etag)
             {
@@ -191,25 +205,24 @@ internal sealed class TestHttpServer : IDisposable
             if (SupportRange && range is not null && range.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
             {
                 var spec = range[6..].Split('-')[0];
-                if (long.TryParse(spec, out var from) && from < bytes.Length)
+                if (long.TryParse(spec, out var from) && from < length)
                 {
-                    var slice = bytes[(int)from..];
-                    WriteResponse(stream, 206, "Partial Content",
+                    ServeFile(stream, file, from, length - from, length - from, 206, "Partial Content",
                         [("ETag", etag), ("Accept-Ranges", "bytes"),
-                         ("Content-Range", $"bytes {from}-{bytes.Length - 1}/{bytes.Length}")],
-                        slice);
+                         ("Content-Range", $"bytes {from}-{length - 1}/{length}")]);
                     return;
                 }
             }
 
-            // gzip 传输（只压载荷，不压清单）
             var isManifest = urlPath.EndsWith("manifest.xml", StringComparison.OrdinalIgnoreCase);
             var wantsGzip = (LastAcceptEncoding ?? string.Empty).Contains("gzip", StringComparison.OrdinalIgnoreCase);
             var askedIdentity = (LastAcceptEncoding ?? string.Empty).Contains("identity", StringComparison.OrdinalIgnoreCase);
 
-            if (CompressPayloads && !isManifest && wantsGzip && (!askedIdentity || NaiveRangeOverCompressed))
+            // gzip 传输（只压载荷，不压清单）。这条路要整块进内存，只用于小文件场景。
+            if (CompressPayloads && !isManifest && wantsGzip && (!askedIdentity || NaiveRangeOverCompressed)
+                && length <= 64L * 1024 * 1024)
             {
-                var gz = Gzip(bytes);
+                var gz = Gzip(File.ReadAllBytes(file));
                 Interlocked.Increment(ref _compressed);
                 WriteResponse(stream, 200, "OK",
                     [("ETag", etag), ("Accept-Ranges", "bytes"), ("Content-Encoding", "gzip")], gz);
@@ -217,15 +230,46 @@ internal sealed class TestHttpServer : IDisposable
             }
 
             // 只截断载荷：清单本身要保持完整，否则测的就不是"载荷截断"了
-            if (TruncateBytes > 0 && bytes.Length > TruncateBytes
-                && !urlPath.EndsWith("manifest.xml", StringComparison.OrdinalIgnoreCase))
+            if (TruncateBytes > 0 && length > TruncateBytes && !isManifest)
             {
-                WriteTruncatedResponse(stream, bytes.Length, bytes[..(bytes.Length - TruncateBytes)], etag);
+                // 声明完整长度，但只发 length - TruncateBytes 个字节 → 客户端应判定截断并重试
+                ServeFile(stream, file, 0, length - TruncateBytes, length, 200, "OK",
+                    [("ETag", etag), ("Accept-Ranges", "bytes")]);
                 return;
             }
 
-            WriteResponse(stream, 200, "OK", [("ETag", etag), ("Accept-Ranges", "bytes")], bytes);
+            ServeFile(stream, file, 0, length, length, 200, "OK",
+                [("ETag", etag), ("Accept-Ranges", "bytes")]);
         }
+    }
+
+    /// <summary>流式发一个文件的一段：head 声明 <paramref name="declaredLength"/>，实际只写 <paramref name="count"/> 字节。</summary>
+    private void ServeFile(Stream stream, string file, long offset, long count, long declaredLength,
+        int code, string reason, (string, string)[] headers)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"HTTP/1.1 {code} {reason}\r\n");
+        sb.Append($"Content-Length: {declaredLength}\r\n");
+        foreach (var (k, v) in headers) sb.Append($"{k}: {v}\r\n");
+        sb.Append("Connection: close\r\n\r\n");
+
+        var head = Encoding.ASCII.GetBytes(sb.ToString());
+        stream.Write(head);
+        Interlocked.Add(ref _wire, head.Length);
+
+        using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
+        fs.Seek(offset, SeekOrigin.Begin);
+        var buffer = new byte[1 << 20];
+        long left = count;
+        while (left > 0)
+        {
+            var n = fs.Read(buffer, 0, (int)Math.Min(buffer.Length, left));
+            if (n <= 0) break;
+            stream.Write(buffer, 0, n);
+            left -= n;
+            Interlocked.Add(ref _wire, n);
+        }
+        stream.Flush();
     }
 
     private string? ResolveFile(string urlPath)
@@ -245,15 +289,6 @@ internal sealed class TestHttpServer : IDisposable
         using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
             gz.Write(data);
         return ms.ToArray();
-    }
-
-    private static void WriteTruncatedResponse(Stream stream, int declaredLength, byte[] partial, string etag)
-    {
-        var head = System.Text.Encoding.ASCII.GetBytes(
-            $"HTTP/1.1 200 OK\r\nContent-Length: {declaredLength}\r\nETag: {etag}\r\nConnection: close\r\n\r\n");
-        stream.Write(head);
-        stream.Write(partial);
-        stream.Flush();   // 内容不足就关连接 → 客户端应判定响应截断
     }
 
     private void WriteResponse(Stream stream, int code, string reason, (string, string)[] headers, byte[] body)

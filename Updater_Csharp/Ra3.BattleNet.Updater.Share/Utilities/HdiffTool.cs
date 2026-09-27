@@ -13,7 +13,22 @@ public static class HdiffTool
 {
     public static readonly string Rid = RuntimeInformation.RuntimeIdentifier;
 
-    public const int TimeoutMs = 300_000;
+    /// <summary>
+    /// 本仓库**随包提供**外部工具的平台。只留 x86-64 的 Windows 与 Linux：
+    /// Windows 是客户端与发布机的主场，Linux 覆盖"发布流水线跑在 Linux CI"的情况。
+    /// 其他平台（arm/arm64/riscv/loongarch/macos/32 位）请自行放入 hdiffpatch_bin/&lt;rid&gt;/。
+    /// </summary>
+    public static readonly string[] ShippedRids = ["win-x64", "linux-x64"];
+
+    /// <summary>
+    /// 外部工具的兜底超时：**按体积缩放**（5 GB 的 ISO 做一次 <c>-s -c-lzma</c> 差分要几十分钟，
+    /// 固定 5 分钟会直接把它掐死）。不是"预计耗时"，是"卡死多久算异常"。
+    /// </summary>
+    public static TimeSpan TimeoutFor(long oldSize, long newSize)
+    {
+        var minutes = 5 + (oldSize + newSize) / (1024.0 * 1024 * 1024) * 8;   // 每 GB 8 分钟
+        return TimeSpan.FromMinutes(Math.Clamp(minutes, 5, 120));
+    }
 
     /// <summary>按 工具目录 → 工具目录/RID → 程序目录 → 程序目录/hdiffpatch_bin/RID → PATH 的顺序查找。</summary>
     public static string? Find(string toolsDir, string toolName)
@@ -62,7 +77,8 @@ public static class HdiffTool
     /// </summary>
     public static bool Generate(string toolsDir, string oldFile, string newFile, string patchFile, out string error)
     {
-        var (ok, err) = RunAsync(toolsDir, "hdiffz", BuildDiffArgs(oldFile, newFile, patchFile), CancellationToken.None)
+        var (ok, err) = RunAsync(toolsDir, "hdiffz", BuildDiffArgs(oldFile, newFile, patchFile),
+                CancellationToken.None, Size(oldFile), Size(newFile))
             .GetAwaiter().GetResult();
         error = err;
         return ok;
@@ -88,7 +104,8 @@ public static class HdiffTool
     /// <summary>应用补丁（同步入口，离线补丁包链路用）。</summary>
     public static bool Apply(string toolsDir, string oldFile, string patchFile, string outFile, out string error)
     {
-        var (ok, err) = RunAsync(toolsDir, "hpatchz", new[] { "-s", "-f", oldFile, patchFile, outFile }, CancellationToken.None)
+        var (ok, err) = RunAsync(toolsDir, "hpatchz", new[] { "-s", "-f", oldFile, patchFile, outFile },
+                CancellationToken.None, Size(oldFile), 0)
             .GetAwaiter().GetResult();
         error = err;
         return ok;
@@ -103,12 +120,23 @@ public static class HdiffTool
         return ok;
     }
 
+    private static long Size(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch { return 0; }
+    }
+
     private static async Task<(bool Ok, string Error)> RunAsync(
-        string toolsDir, string toolName, string[] args, CancellationToken ct)
+        string toolsDir, string toolName, string[] args, CancellationToken ct,
+        long oldSize = 0, long newSize = 0)
     {
         var exePath = Find(toolsDir, toolName);
         if (exePath is null)
-            return (false, $"找不到外部工具 {toolName}（工具目录: {toolsDir}）");
+            return (false,
+                $"找不到外部工具 {toolName}：当前 RID = {Rid}，本包随发的平台只有 " +
+                $"{string.Join(" / ", ShippedRids)}。工具目录 = {toolsDir}。" +
+                "请从 HDiffPatch 官方包把对应平台的二进制放进 hdiffpatch_bin/<rid>/，" +
+                "或接受「完整下载」的回落（客户端不会因此失败）。");
 
         var psi = new ProcessStartInfo(exePath)
         {
@@ -126,8 +154,9 @@ public static class HdiffTool
         var stdout = p.StandardOutput.ReadToEndAsync(ct);
         var stderr = p.StandardError.ReadToEndAsync(ct);
 
+        var timeout = TimeoutFor(oldSize, newSize);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeoutMs);
+        cts.CancelAfter(timeout);
 
         try
         {
@@ -138,7 +167,7 @@ public static class HdiffTool
             try { p.Kill(entireProcessTree: true); } catch { /* 尽力而为 */ }
             return (false, ct.IsCancellationRequested
                 ? $"{toolName} 已取消"
-                : $"{toolName} 超时（>{TimeoutMs}ms）");
+                : $"{toolName} 超时（>{timeout.TotalMinutes:F0} 分钟）");
         }
 
         var so = await stdout.ConfigureAwait(false);

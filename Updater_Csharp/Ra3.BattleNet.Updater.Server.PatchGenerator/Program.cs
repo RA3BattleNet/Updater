@@ -20,7 +20,7 @@ internal static class Program
         long minSize = PatchGenerator.DefaultMinFileSize;
         var verify = true;
         var prune = false;
-        var compressFiles = true;
+        var compressFiles = false;
         var baselines = new List<Baseline>();
 
         try
@@ -43,7 +43,7 @@ internal static class Program
                     case "--min-size": minSize = long.Parse(Next(args, ref i)); break;
                     case "--no-verify": verify = false; break;
                     case "--prune": prune = true; break;
-                    case "--no-compress-files": compressFiles = false; break;
+                    case "--compress-files": compressFiles = true; break;
                     default:
                         Console.Error.WriteLine($"未知参数：{args[i]}");
                         ShowUsage();
@@ -98,6 +98,7 @@ internal static class Program
         Console.WriteLine("  --tools <目录>                 外部工具目录（默认程序目录）");
         Console.WriteLine("  --prune                        删除不属于当前基线集合的补丁文件");
         Console.WriteLine("  --no-verify                    跳过「补丁可用性」校验（默认会校验）");
-        Console.WriteLine("  --no-compress-files            不生成 files/{md5}.gz 预压缩旁挂（默认生成）");
+        Console.WriteLine("  --compress-files               额外生成 files/{md5}.gz 预压缩旁挂（默认不生成；");
+        Console.WriteLine("                                 客户端目前不消费它，见 README.md）");
     }
 }
