@@ -218,6 +218,7 @@ public class VersionMatrixSimulation
                 r.Full,
                 r.FailedCount,
                 r.BytesDownloaded,
+                WireBytes = wireBytes,
                 Ms = (long)r.Elapsed.TotalMilliseconds,
                 Requests = requests,
                 HitRate = hitRate,
