@@ -106,12 +106,27 @@ internal sealed class HttpFetcher : IDisposable
 
                 if (!resp.IsSuccessStatusCode)
                 {
-                    if (attempt == 3)
-                        return new DownloadOutcome(false, (int)resp.StatusCode, 0, $"HTTP {(int)resp.StatusCode}");
+                    var code = (int)resp.StatusCode;
 
-                    await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct).ConfigureAwait(false);
+                    // 确定性的拒绝不该重试：403/404/410 再问三遍还是同一个答案，
+                    // 只会让用户多等一个来回。由调用方决定回落（下个源 / 完整下载）。
+                    if (attempt == 3 || code is 403 or 404 or 410)
+                        return new DownloadOutcome(false, code, 0, $"HTTP {code}");
+
+                    await Task.Delay(Backoff(attempt), ct).ConfigureAwait(false);
                     continue;
                 }
+
+                // 读超时分层：连接超时在 handler 上是 5s，正文读取按大小给预算。
+                // 固定 10 分钟会把大文件掐死（200 MB @ 300 KB/s 就要 11 分钟），
+                // 也会让小文件白等。按声明的 Content-Length 以「64 KB/s 下限速度」折算，
+                // 上限 30 分钟；拿不到长度时退回 10 分钟。
+                var declared = resp.Content.Headers.ContentLength;
+                var budget = declared is > 0
+                    ? TimeSpan.FromSeconds(60 + declared.Value / (64.0 * 1024))
+                    : TimeSpan.FromMinutes(10);
+                if (budget > TimeSpan.FromMinutes(30)) budget = TimeSpan.FromMinutes(30);
+                cts.CancelAfter(budget);
 
                 var append = existing > 0 && resp.StatusCode == HttpStatusCode.PartialContent;
                 long written = append ? existing : 0;
@@ -138,12 +153,16 @@ internal sealed class HttpFetcher : IDisposable
             catch (Exception ex)
             {
                 if (attempt == 3) return new DownloadOutcome(false, 0, 0, ex.Message);
-                await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct).ConfigureAwait(false);
+                await Task.Delay(Backoff(attempt), ct).ConfigureAwait(false);
             }
         }
 
         return new DownloadOutcome(false, 0, 0, "下载重试超限");
     }
+
+    /// <summary>指数退避：300ms → 600ms（§4.6「重试：指数退避、上限 2–3 次」）。</summary>
+    private static TimeSpan Backoff(int attempt) =>
+        TimeSpan.FromMilliseconds(300 * Math.Pow(2, attempt - 1));
 
     private static HttpRequestMessage NewRequest(string url)
     {

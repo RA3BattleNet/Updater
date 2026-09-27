@@ -25,7 +25,7 @@ internal sealed class UpdateLog : IDisposable
 
     public string RunId { get; }
 
-    public UpdateLog(string? path, string runId)
+    public UpdateLog(string? path, string runId, long maxBytes = 0)
     {
         RunId = runId;
         if (string.IsNullOrEmpty(path)) return;
@@ -33,9 +33,18 @@ internal sealed class UpdateLog : IDisposable
         {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Fs.CreateDirectory(dir);
+
+            // §4.11：按大小轮转。只留一代历史（update.log.1），
+            // 目的是不让客户端安装目录里的日志无限长大 —— 分析脚本读当前那份即可。
+            if (maxBytes > 0 && Fs.Exists(path) && Fs.Length(path) >= maxBytes)
+                Fs.Move(path, path + ".1", overwrite: true);
+
             _writer = new StreamWriter(new FileStream(Fs.P(path), FileMode.Append, FileAccess.Write, FileShare.Read), new UTF8Encoding(false))
             {
                 AutoFlush = true,
+                // §4.11：换行必须是 LF。StreamWriter 默认跟 Environment.NewLine 走，
+                // 在 Windows 上就成了 CRLF —— 分析脚本每行会多出一个不可见的 \r。
+                NewLine = "\n",
             };
         }
         catch
