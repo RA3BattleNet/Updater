@@ -17,15 +17,15 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
   --tools <目录>                 外部工具目录（默认程序目录）
   --prune                        删除不属于当前基线集合的补丁文件
   --no-verify                    跳过「补丁可用性」校验（默认会校验）
-  --compress-files               额外生成 files/{md5}.gz 预压缩旁挂（默认不生成，见下）
+  --compress-files               额外生成 files/{md5}.bin.gz 预压缩旁挂（默认不生成，见下）
 ```
 
 输出形态（内容寻址，URL 可从 `{BaseUrl}` 直接推导，客户端不需要任何索引文件）：
 
 ```
 {output}/
-├── files/{md5}              完整文件（跨版本天然去重）
-└── patches/{oldHash}_{newHash}.hdiff   补丁（内容对寻址，old 在前 new 在后）
+├── files/{md5}.bin              完整文件（跨版本天然去重）
+└── patches/{oldHash}_{newHash}.bin   补丁（内容对寻址，old 在前 new 在后）
 ```
 
 ## 补丁生成参数（**别改错，差 3 倍**）
@@ -41,14 +41,14 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
 
 实测（v4→v5 的真实内容对）：`-s` 69.7% → `-m -c-lzma` **21.5%**，约 **3.2 倍**。
 
-## `--compress-files`：`files/{md5}.gz` 预压缩旁挂（**默认关闭**）
+## `--compress-files`：`files/{md5}.bin.gz` 预压缩旁挂（**默认关闭**）
 
-- **客户端目前不消费它。** 客户端只请求 `files/{md5}`；那条"优先取 `.gz` 并自己解压"的分支
+- **客户端目前不消费它。** 客户端只请求 `files/{md5}.bin`；那条"优先取 `.gz` 并自己解压"的分支
   已按决策**删除**（协议描述保留在 AGENT.md §4.6，将来要用时照规范重新实现）。
 - 因此打开这个开关**不会**让任何客户端省一个字节，只会带来：
   - 发布期 CPU（给每个文件压一遍）；
   - 约 **+46% 存储**（实测 1144.8 MiB → 526.3 MiB 的旁挂）；
-  - 以及与客户端无关的额外文件（`files/{md5}.gz`）。
+  - 以及与客户端无关的额外文件（`files/{md5}.bin.gz`）。
 - 保留它是为了"以后可能要"，以及**边缘/主机自己支持 `Content-Encoding` 的场景**：
   那种情况下主机可以直接发这些旁挂，客户端本来就是透明解压、零代码。
   但按当前决策，**这条能力不纳入设计假设**（默认认为主机没有）。
@@ -57,7 +57,7 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
 
 ## 其它注意
 
-- 补丁命名严格是 `patches/{oldHash}_{newHash}.hdiff`（old 在前）。顺序反了不会报错，
+- 补丁命名严格是 `patches/{oldHash}_{newHash}.bin`（old 在前）。顺序反了不会报错，
   只会"永远不命中补丁、永远完整下载"，所以规范与测试各钉了一次。
 - **补丁不小于目标文件就弃用**（生成后比较大小），客户端随后自然 404 → 完整下载。
 - 生成后必须**校验补丁真的能把旧文件还原成新文件**（默认开启，`--no-verify` 才跳过）。

@@ -36,7 +36,7 @@ public class EndToEndTests
         Assert.Equal(1, gen2.Added.Count);                 // bin/c.dll
         Assert.Equal(3, gen2.Modified.Count + gen2.Unchanged.Count + gen2.Moved.Count);
 
-        // 2) 生成服务端静态树：files/{md5} + patches/{old}_{new}.hdiff
+        // 2) 生成服务端静态树：files/{md5} + patches/{old}_{new}.bin
         var server = tmp.Sub("server");
         var summary = PatchGenerator.Generate(m2Path, v2, [new Baseline(m1Path, v1)], server, minFileSize: 0);
 
@@ -45,8 +45,8 @@ public class EndToEndTests
 
         var patchFiles = Directory.GetFiles(Path.Combine(server, "patches"));
         Assert.Single(patchFiles);
-        Assert.EndsWith(".hdiff", patchFiles[0]);
-        Assert.Matches("^[0-9a-f]{32}_[0-9a-f]{32}\\.hdiff$", Path.GetFileName(patchFiles[0]));
+        Assert.EndsWith(".bin", patchFiles[0]);
+        Assert.Matches("^[0-9a-f]{32}_[0-9a-f]{32}\\.bin$", Path.GetFileName(patchFiles[0]));
 
         File.Copy(m2Path, Path.Combine(server, "manifest.xml"), overwrite: true);
 

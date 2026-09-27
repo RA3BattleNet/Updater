@@ -7,7 +7,7 @@ namespace Ra3.BattleNet.Updater.Client
 {
     /// <summary>
     /// 离线补丁包的应用端。载荷寻址与在线链路一致：
-    ///   完整文件 files/{md5}，补丁 patches/{old}_{new}.hdiff。
+    ///   完整文件 files/{md5}.bin，补丁 patches/{old}_{new}.bin。
     /// 每种操作都带 OldFilePath，因此**改名 + 改内容**也能正确地在旧文件上打补丁、
     /// 再写到新路径（AGENT.md §9.2）。
     /// </summary>

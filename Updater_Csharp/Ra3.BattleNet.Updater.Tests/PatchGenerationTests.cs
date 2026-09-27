@@ -47,12 +47,12 @@ public class PatchGenerationTests
 
         var patch = Assert.Single(Directory.GetFiles(Path.Combine(server, "patches")));
         var name = Path.GetFileName(patch);
-        Assert.Matches("^[0-9a-f]{32}_[0-9a-f]{32}\\.hdiff$", name);
+        Assert.Matches("^[0-9a-f]{32}_[0-9a-f]{32}\\.bin$", name);
 
         // 名字里的两个端点必须与清单一致（old 在前、new 在后，AGENT.md §3.3）
         var oldMd5 = TestSupport.Md5File(Path.Combine(v1, "s.txt"));
         var newMd5 = TestSupport.Md5File(Path.Combine(v2, "s.txt"));
-        Assert.Equal($"{oldMd5}_{newMd5}.hdiff", name);
+        Assert.Equal($"{oldMd5}_{newMd5}.bin", name);
     }
 
     [Fact]

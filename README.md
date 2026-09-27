@@ -34,8 +34,8 @@ Updater_Csharp/
 | 资源 | 地址 |
 |---|---|
 | 清单 | `{BaseUrl}/manifest.xml` |
-| 完整文件 | `{BaseUrl}/files/{md5}` |
-| 补丁 | `{BaseUrl}/patches/{oldHash}_{newHash}.hdiff` |
+| 完整文件 | `{BaseUrl}/files/{md5}.bin` |
+| 补丁 | `{BaseUrl}/patches/{oldHash}_{newHash}.bin` |
 
 - **没有索引文件**。客户端用「本地文件的内容哈希」与「远端清单里的目标哈希」直接推出地址。
 - 三者的 URL 都是**内容寻址、不可变**的，因此可以长缓存、可续传、可无脑重试。
@@ -46,9 +46,9 @@ Updater_Csharp/
 ```
 目标路径已有且哈希一致            → skip
 按 UUID 定位到前身、内容一致      → move（改写/移动，0 下载）
-按 UUID 定位到前身、内容不同      → GET patches/{old}_{new}.hdiff
+按 UUID 定位到前身、内容不同      → GET patches/{old}_{new}.bin
                                     200 → 打补丁 → 校验；404 或失败 → 回落完整下载
-本地没有可用前身                  → GET files/{md5}
+本地没有可用前身                  → GET files/{md5}.bin
 ```
 
 > 路径与内容**同时**变化的文件，生成器无法自动判定为同一文件：

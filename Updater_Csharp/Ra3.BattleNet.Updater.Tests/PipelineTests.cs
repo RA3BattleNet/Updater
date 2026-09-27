@@ -50,15 +50,15 @@ public class PipelineTests
 
         var paths = http.RequestPaths;
 
-        // 三种资源都能从 BaseUrl 直接推导（§3.2）
+        // 三种资源都能从 BaseUrl 直接推导（§3.2）；`.bin` 后缀是为了进 CF 的默认缓存白名单
         Assert.Contains("/manifest.xml", paths);
-        Assert.Contains($"/patches/{oldMd5}_{newMd5}.hdiff", paths);
-        Assert.Contains($"/files/{addedMd5}", paths);
+        Assert.Contains($"/patches/{oldMd5}_{newMd5}.bin", paths);
+        Assert.Contains($"/files/{addedMd5}.bin", paths);
 
         // **顺序**：old 在前、new 在后。反过来写不会报错，只会永远不命中补丁。
         var patchPath = paths.Single(p => p.StartsWith("/patches/", StringComparison.Ordinal));
-        Assert.Equal($"/patches/{oldMd5}_{newMd5}.hdiff", patchPath);
-        Assert.DoesNotContain($"/patches/{newMd5}_{oldMd5}.hdiff", paths);
+        Assert.Equal($"/patches/{oldMd5}_{newMd5}.bin", patchPath);
+        Assert.DoesNotContain($"/patches/{newMd5}_{oldMd5}.bin", paths);
         Assert.DoesNotContain(paths, p => p.Contains("patches.json", StringComparison.OrdinalIgnoreCase));
     }
 

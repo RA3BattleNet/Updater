@@ -6,7 +6,7 @@ using Ra3.BattleNet.Updater.Core;
 namespace Ra3.BattleNet.Updater.Tests;
 
 /// <summary>
-/// <c>files/{md5}.gz</c> 预压缩旁挂（AGENT.md §4.6）。
+/// <c>files/{md5}.bin.gz</c> 预压缩旁挂（AGENT.md §4.6）。
 ///
 /// 决策记录（需求方 2026-09-27）：
 /// - **客户端不消费它**：默认不访问、也没有开关可以打开。那条分支已按决策删除；

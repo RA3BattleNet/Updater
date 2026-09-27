@@ -44,7 +44,7 @@ public class PatchPackageTests
 
         // 载荷必须与在线链路同一套命名
         foreach (var f in Directory.GetFiles(Path.Combine(package, "patches")))
-            Assert.Matches("^[0-9a-f]{32}_[0-9a-f]{32}\\.hdiff$", Path.GetFileName(f));
+            Assert.Matches("^[0-9a-f]{32}_[0-9a-f]{32}\\.bin$", Path.GetFileName(f));
 
         // 三种操作都要出现：内容变了走补丁、新增走完整、纯改名走 move
         var manifest = ClientApi.LoadPatchManifest(package);

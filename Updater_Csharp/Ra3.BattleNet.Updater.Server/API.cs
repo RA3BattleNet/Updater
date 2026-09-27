@@ -7,7 +7,7 @@ namespace Ra3.BattleNet.Updater.Server
     /// <summary>
     /// 离线补丁包（一次性 A→B 对比）的生成端。
     /// 产物与在线链路使用**同一套寻址约定**：
-    ///   完整文件 files/{md5}，补丁 patches/{oldHash}_{newHash}.hdiff。
+    ///   完整文件 files/{md5}.bin，补丁 patches/{oldHash}_{newHash}.bin。
     /// 补丁包是一个自包含目录：patch-manifest.json + files/ + patches/。
     /// </summary>
     public static class API
@@ -81,7 +81,7 @@ namespace Ra3.BattleNet.Updater.Server
                 }
 
                 // 生成补丁（内容对命名，天然去重）
-                var patchName = $"{oldFile.MD5}_{newFile.MD5}.hdiff";
+                var patchName = UpdaterProtocol.PatchFileName(oldFile.MD5, newFile.MD5);
                 var patchPath = Path.Combine(patchesDir, patchName);
 
                 if (!File.Exists(patchPath) && !PatchGenerater.GeneratePatch(oldFull, newFull, patchPath))
@@ -144,17 +144,18 @@ namespace Ra3.BattleNet.Updater.Server
                     case OperationTypeEnum.ForceCopy:
                     case OperationTypeEnum.Move:
                     {
-                        // 内容寻址：同一内容只放一份
-                        var dest = Path.Combine(filesDir, op.File.MD5);
+                        // 内容寻址：同一内容只放一份（文件名带 .bin，为的是进 CF 的默认缓存白名单）
+                        var dest = Path.Combine(filesDir, UpdaterProtocol.FullFileName(op.File.MD5));
                         if (!File.Exists(dest) && op.SourcePath is not null)
                             File.Copy(op.SourcePath, dest, overwrite: true);
-                        op.RelativePath = $"files/{op.File.MD5}";
+                        op.RelativePath = UpdaterProtocol.FullRelativePath(op.File.MD5);
                         break;
                     }
 
                     case OperationTypeEnum.Patch:
                         // 补丁已按内容对写在 patches/ 下
-                        op.RelativePath = $"patches/{Path.GetFileName(op.PatchPath!)}";
+                        op.RelativePath = UpdaterProtocol.PatchRelativePath(
+                            op.SourceMD5 ?? string.Empty, op.TargetMD5 ?? string.Empty);
                         break;
                 }
             }

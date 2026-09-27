@@ -6,7 +6,7 @@
       "Type": "patch",
       "FilePath": "//git_version",
       "UUID": "ec8819ac93624b23903025f67d120879",
-      "RelativePath": "files/ec8819ac93624b23903025f67d120879.hdiff",
+      "RelativePath": "patches/fb2b21b2238d6be4bbd687ef9626cca1_808f0febad563484e73a78411c1d90b9.bin",
       "Size": 28,
       "SourceMD5": "fb2b21b2238d6be4bbd687ef9626cca1",
       "TargetMD5": "808f0febad563484e73a78411c1d90b9"
@@ -15,7 +15,7 @@
       "Type": "patch",
       "FilePath": "//tools/EnhancerCorona.dll",
       "UUID": "4f983c9756f14d668b514116009cc769",
-      "RelativePath": "files/4f983c9756f14d668b514116009cc769.hdiff",
+      "RelativePath": "patches/1327dbda98a5f18d779154c9c7549358_2db41309c9eadae1ef568f8a649289d0.bin",
       "Size": 2056831,
       "SourceMD5": "1327dbda98a5f18d779154c9c7549358",
       "TargetMD5": "2db41309c9eadae1ef568f8a649289d0"
@@ -24,7 +24,7 @@
       "Type": "patch",
       "FilePath": "//tools/RA3LuaBridge.dll",
       "UUID": "7e57fc5329f744ad938faa530f680c3b",
-      "RelativePath": "files/7e57fc5329f744ad938faa530f680c3b.hdiff",
+      "RelativePath": "patches/f07deca971d5e53bd6e4b65071907b50_1c602e80d41ed740d320d0a18b87b9aa.bin",
       "Size": 426128,
       "SourceMD5": "f07deca971d5e53bd6e4b65071907b50",
       "TargetMD5": "1c602e80d41ed740d320d0a18b87b9aa"

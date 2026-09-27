@@ -17,7 +17,9 @@ public sealed record PatchGenerationSummary(
 /// <summary>
 /// 补丁与完整文件生成（AGENT.md §5.3 / §5.4）。
 /// 无状态、无数据库：输入是"新版本 manifest + 若干基线 manifest"，输出是静态文件树。
-/// 命名：完整文件 files/{md5}；补丁 patches/{oldHash}_{newHash}.hdiff。
+/// 命名：完整文件 files/{md5}.bin；补丁 patches/{oldHash}_{newHash}.bin。
+/// （`.bin` 不是随手起的：CF 的边缘缓存按扩展名白名单决定缓不缓存，`.bin` 在名单里、
+/// 无扩展名与 `.hdiff` 都不在 —— 见 <see cref="UpdaterProtocol"/> 的注释。）
 /// </summary>
 public static class PatchGenerator
 {
@@ -28,7 +30,7 @@ public static class PatchGenerator
     public const long DefaultMinFileSize = 0;
 
     /// <summary>
-    /// 给 <c>files/{md5}</c> 生成预压缩旁挂 <c>files/{md5}.gz</c>（**可选项，默认关闭**）。
+    /// 给 <c>files/{md5}.bin</c> 生成预压缩旁挂 <c>files/{md5}.bin.gz</c>（**可选项，默认关闭**）。
     /// 客户端目前**不消费**它（见 AGENT.md §4.6）；开启只会有发布期 CPU 与约 +46% 存储的代价。
     /// 压不动的（小文件/已压过的二进制）不写：小文件 gzip 反而更大，写了纯亏。
     /// 已存在且比原文件小就跳过（幂等：重跑发布流水线不会白压一遍 1 GB）。
@@ -98,14 +100,14 @@ public static class PatchGenerator
         {
             var full = FullPath(newRoot, f);
             if (!File.Exists(full)) continue;
-            var target = Path.Combine(filesDir, f.MD5);
+            var target = Path.Combine(filesDir, UpdaterProtocol.FullFileName(f.MD5));
             if (!File.Exists(target))
             {
                 File.Copy(full, target, overwrite: true);
                 copied++;
             }
 
-            // 预压缩变体 files/{md5}.gz（AGENT.md §4.6）：
+            // 预压缩变体 files/{md5}.bin.gz（AGENT.md §4.6）：
             // **客户端显式请求它、自己解压** —— 不依赖边缘任何能力（gzip_static / Content-Encoding 都不用）。
             // 原文件必须同时保留：老客户端、或关掉该功能的客户端走的就是原文件那条路。
             if (compressFiles)
@@ -128,7 +130,7 @@ public static class PatchGenerator
                 var oldPath = FullPath(baseline.RootPath, oldFile);
                 if (!File.Exists(oldPath)) continue;
 
-                var name = $"{oldFile.MD5}_{newFile.MD5}.hdiff";
+                var name = UpdaterProtocol.PatchFileName(oldFile.MD5, newFile.MD5);
                 expected.Add(name);
 
                 var patchPath = Path.Combine(patchesDir, name);
@@ -171,7 +173,7 @@ public static class PatchGenerator
         var pruned = 0;
         if (prune)
         {
-            foreach (var file in Directory.GetFiles(patchesDir, "*.hdiff"))
+            foreach (var file in Directory.GetFiles(patchesDir, "*.bin"))
             {
                 if (expected.Contains(Path.GetFileName(file))) continue;
                 File.Delete(file);

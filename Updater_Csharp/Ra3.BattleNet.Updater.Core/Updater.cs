@@ -355,20 +355,20 @@ public sealed class Updater
         }
     }
 
-    /// <summary>尝试补丁：GET patches/{old}_{new}.hdiff，404 即回落（§3.3 / §4.3）。</summary>
+    /// <summary>尝试补丁：GET patches/{old}_{new}.bin，404 即回落（§3.3 / §4.3）。</summary>
     private async Task<(bool Ok, string Reason, long Bytes, long Payload)> TryPatchAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, CancellationToken ct)
     {
         if (entry.PredecessorPath is null || entry.PredecessorHash is null || !Fs.Exists(entry.PredecessorPath))
             return (false, UpdateReasons.NoLocal, 0, 0);
 
-        var patchName = $"{entry.PredecessorHash}_{entry.Target.MD5}.hdiff";
+        var patchName = UpdaterProtocol.PatchFileName(entry.PredecessorHash, entry.Target.MD5);
         var patchPath = Path.Combine(cacheDir, patchName);
 
         long bytes = 0, payload = 0;
         if (!Fs.Exists(patchPath))
         {
-            var got = await FetchAsync(fetcher, "patches/" + patchName, patchPath, ct).ConfigureAwait(false);
+            var got = await FetchAsync(fetcher, UpdaterProtocol.PatchRelativePath(entry.PredecessorHash, entry.Target.MD5), patchPath, ct).ConfigureAwait(false);
             if (!got.Ok)
                 return (false, got.StatusCode == 404 ? UpdateReasons.NoPatch : UpdateReasons.PatchFailed, 0, got.PayloadBytes);
             bytes = got.Bytes;
@@ -399,10 +399,10 @@ public sealed class Updater
     }
 
     /// <summary>
-    /// 完整下载：<c>GET files/{md5}</c>（§3.2）。
+    /// 完整下载：<c>GET files/{md5}.bin</c>（§3.2）。
     /// 【必须】下载完要**校验**（§4.3 ⑥），而且校验发生在放到目标路径之前 ——
     /// 这是唯一能挡住"传完了但内容是坏的"（代理返回垃圾、传输被截断…）的一步。
-    /// 注意：**不访问** <c>files/{md5}.gz</c> 预压缩旁挂 —— 那条路已按决策移除（见 AGENT.md §4.6），
+    /// 注意：**不访问** <c>files/{md5}.bin.gz</c> 预压缩旁挂 —— 那条路已按决策移除（见 AGENT.md §4.6），
     /// 服务端仍可生成旁挂（默认关闭），将来要消费它时按规范里的协议重新实现。
     /// </summary>
     private async Task<(PlanAction Action, int Status, string Reason, long Bytes, long Payload)> FullAsync(
@@ -424,7 +424,7 @@ public sealed class Updater
                 // 重下一次的代价远小于把一个坏文件安置进用户目录（§4.3⑥）。
                 for (var round = 1; ; round++)
                 {
-                    var got = await FetchAsync(fetcher, "files/" + entry.Target.MD5, blob, ct).ConfigureAwait(false);
+                    var got = await FetchAsync(fetcher, UpdaterProtocol.FullRelativePath(entry.Target.MD5), blob, ct).ConfigureAwait(false);
                     if (!got.Ok)
                         return (PlanAction.Full, LogStatus.RetryExceeded, UpdateReasons.DownloadFailed,
                                 bytes, payload + got.PayloadBytes);
