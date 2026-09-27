@@ -61,4 +61,7 @@ public static class UpdateReasons
     public const string IoError = "io_error";
     public const string ManifestUnavailable = "manifest_unavailable";
     public const string LocalCorrupt = "local_corrupt";
+
+    /// <summary>已有另一个更新实例在运行（AGENT.md §4.9）。</summary>
+    public const string AlreadyRunning = "already_running";
 }

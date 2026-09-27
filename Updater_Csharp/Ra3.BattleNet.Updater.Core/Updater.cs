@@ -20,7 +20,35 @@ public sealed class Updater
     public UpdateResult Run(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
         => RunAsync(progress, ct).GetAwaiter().GetResult();
 
+    /// <summary>
+    /// 跑一次更新。同一安装根目录同一时刻只允许一个会话（AGENT.md §4.9）。
+    /// 用缓存目录里的**独占文件锁**而不是命名 Mutex：Mutex 有线程亲和性，
+    /// 会在 await 之后跨线程释放而失败。
+    /// </summary>
     public async Task<UpdateResult> RunAsync(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
+    {
+        var cacheDir = Path.GetFullPath(_cfg.ResolveCacheDir());
+        Fs.CreateDirectory(cacheDir);
+
+        var lockPath = Path.Combine(cacheDir, "update.lock");
+        FileStream lockStream;
+        try
+        {
+            lockStream = new FileStream(Fs.P(lockPath), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException)
+        {
+            return new UpdateResult(UpdateOutcome.Failed, UpdateReasons.AlreadyRunning,
+                0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero, "已有另一个更新实例在运行");
+        }
+
+        using (lockStream)
+        {
+            return await RunCoreAsync(progress, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
         var tally = new Tally();

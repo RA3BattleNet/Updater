@@ -11,7 +11,8 @@ public sealed record PatchGenerationSummary(
     int PatchesSkipped,
     int PatchesFailed,
     int FilesCopied,
-    long PatchBytes);
+    long PatchBytes,
+    int PatchesPruned);
 
 /// <summary>
 /// 补丁与完整文件生成（AGENT.md §5.3 / §5.4）。
@@ -30,6 +31,7 @@ public static class PatchGenerator
         string outputDir,
         long minFileSize = DefaultMinFileSize,
         bool verify = true,
+        bool prune = false,
         string? toolsDir = null)
     {
         var tools = toolsDir ?? AppContext.BaseDirectory;
@@ -46,10 +48,12 @@ public static class PatchGenerator
         var skipped = 0;
         var failed = 0;
         long patchBytes = 0;
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var f in current.Manifest.Files)
         {
-            if (!TryPath(newRoot, f, out var full) || !File.Exists(full)) continue;
+            var full = FullPath(newRoot, f);
+            if (!File.Exists(full)) continue;
             var target = Path.Combine(filesDir, f.MD5);
             if (File.Exists(target)) continue;
             File.Copy(full, target, overwrite: true);
@@ -65,11 +69,17 @@ public static class PatchGenerator
                 if (string.Equals(oldFile.MD5, newFile.MD5, StringComparison.OrdinalIgnoreCase)) continue;
                 if (oldFile.MD5.Length != 32 || newFile.MD5.Length != 32) continue;
 
-                if (!TryPath(newRoot, newFile, out var newPath) || !File.Exists(newPath)) continue;
+                var newPath = FullPath(newRoot, newFile);
+                if (!File.Exists(newPath)) continue;
                 if (new FileInfo(newPath).Length < minFileSize) continue;
-                if (!TryPath(baseline.RootPath, oldFile, out var oldPath) || !File.Exists(oldPath)) continue;
 
-                var patchPath = Path.Combine(patchesDir, $"{oldFile.MD5}_{newFile.MD5}.hdiff");
+                var oldPath = FullPath(baseline.RootPath, oldFile);
+                if (!File.Exists(oldPath)) continue;
+
+                var name = $"{oldFile.MD5}_{newFile.MD5}.hdiff";
+                expected.Add(name);
+
+                var patchPath = Path.Combine(patchesDir, name);
                 if (File.Exists(patchPath))
                 {
                     skipped++;
@@ -83,7 +93,7 @@ public static class PatchGenerator
                     continue;
                 }
 
-                if (verify && !VerifyPatch(tools, oldPath, tmp, newFile.MD5, out _))
+                if (verify && !VerifyPatch(tools, oldPath, tmp, newFile.MD5))
                 {
                     failed++;
                     if (File.Exists(tmp)) File.Delete(tmp);
@@ -96,27 +106,33 @@ public static class PatchGenerator
             }
         }
 
-        return new PatchGenerationSummary(baselines.Count, created, skipped, failed, copied, patchBytes);
+        // 保留策略（§5.4）：只保留"当前基线集合能推导出来的"补丁，其余删除。
+        // 删除是安全的：老客户端会 404 → 回落完整下载。
+        var pruned = 0;
+        if (prune)
+        {
+            foreach (var file in Directory.GetFiles(patchesDir, "*.hdiff"))
+            {
+                if (expected.Contains(Path.GetFileName(file))) continue;
+                File.Delete(file);
+                pruned++;
+            }
+        }
+
+        return new PatchGenerationSummary(baselines.Count, created, skipped, failed, copied, patchBytes, pruned);
     }
 
     /// <summary>校验补丁确实能把旧文件还原成目标内容（AGENT.md §5.3）。</summary>
-    private static bool VerifyPatch(string tools, string oldPath, string patchPath, string expectedMd5, out string error)
+    private static bool VerifyPatch(string tools, string oldPath, string patchPath, string expectedMd5)
     {
         var outFile = patchPath + ".verify";
         try
         {
-            if (!HdiffTool.Apply(tools, oldPath, patchPath, outFile, out error)) return false;
+            if (!HdiffTool.Apply(tools, oldPath, patchPath, outFile, out _)) return false;
 
             using var s = new FileStream(outFile, FileMode.Open, FileAccess.Read, FileShare.Read);
             var md5 = Convert.ToHexStringLower(System.Security.Cryptography.MD5.HashData(s));
-            if (string.Equals(md5, expectedMd5, StringComparison.OrdinalIgnoreCase))
-            {
-                error = string.Empty;
-                return true;
-            }
-
-            error = $"校验失败：期望 {expectedMd5} 实得 {md5}";
-            return false;
+            return string.Equals(md5, expectedMd5, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -124,9 +140,6 @@ public static class PatchGenerator
         }
     }
 
-    private static bool TryPath(string root, ManifestFile file, out string full)
-    {
-        full = Path.Combine(root, file.RelativePath().Replace('/', Path.DirectorySeparatorChar));
-        return true;
-    }
+    private static string FullPath(string root, ManifestFile file) =>
+        Path.Combine(root, file.RelativePath().Replace('/', Path.DirectorySeparatorChar));
 }

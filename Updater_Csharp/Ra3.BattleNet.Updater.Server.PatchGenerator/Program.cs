@@ -19,6 +19,7 @@ internal static class Program
         string? manifest = null, manifestRoot = null, output = null, tools = null;
         long minSize = PatchGenerator.DefaultMinFileSize;
         var verify = true;
+        var prune = false;
         var baselines = new List<Baseline>();
 
         try
@@ -40,6 +41,7 @@ internal static class Program
                     case "--tools": tools = Next(args, ref i); break;
                     case "--min-size": minSize = long.Parse(Next(args, ref i)); break;
                     case "--no-verify": verify = false; break;
+                    case "--prune": prune = true; break;
                     default:
                         Console.Error.WriteLine($"未知参数：{args[i]}");
                         ShowUsage();
@@ -67,11 +69,11 @@ internal static class Program
 
         var summary = PatchGenerator.Generate(
             Path.GetFullPath(manifest), Path.GetFullPath(manifestRoot), resolved,
-            Path.GetFullPath(output), minSize, verify, tools);
+            Path.GetFullPath(output), minSize, verify, prune, tools);
 
         Console.WriteLine($"基线 {summary.Baselines} 个");
         Console.WriteLine($"补丁：新建 {summary.PatchesCreated}，已存在 {summary.PatchesSkipped}，失败 {summary.PatchesFailed}，合计 {summary.PatchBytes:N0} 字节");
-        Console.WriteLine($"完整文件：复制 {summary.FilesCopied}");
+        Console.WriteLine($"完整文件：复制 {summary.FilesCopied}；清理补丁 {summary.PatchesPruned}$");
         Console.WriteLine($"输出目录：{Path.GetFullPath(output)}");
         return summary.PatchesFailed > 0 ? 1 : 0;
     }
@@ -92,6 +94,7 @@ internal static class Program
         Console.WriteLine("  --output                       输出目录（files/ 与 patches/ 会在此建立）");
         Console.WriteLine("  --min-size <字节>              小于该大小的文件不生成补丁（默认 16384）");
         Console.WriteLine("  --tools <目录>                 外部工具目录（默认程序目录）");
+        Console.WriteLine("  --prune                        删除不属于当前基线集合的补丁文件");
         Console.WriteLine("  --no-verify                    跳过「补丁可用性」校验（默认会校验）");
     }
 }
