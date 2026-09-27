@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 
 namespace Ra3.BattleNet.Updater.Core;
 
-internal sealed record DownloadOutcome(bool Ok, int StatusCode, long Bytes, string Reason);
+internal sealed record DownloadOutcome(bool Ok, int StatusCode, long Bytes, string Reason, long WireBytes = 0);
 
 internal sealed record ManifestOutcome(bool Ok, bool NotModified, byte[]? Content, string? ETag, string Reason, string? HttpVersion);
 
@@ -18,6 +18,13 @@ internal sealed class HttpFetcher : IDisposable
     private readonly HttpClient _http;
 
     private int _requests;
+    private long _wire;
+
+    /// <summary>
+    /// 本会话**真正读下网线**的字节数（压缩后就是压缩后的大小）。AGENT.md §2.2 要与整包比带宽，
+    /// 比的必须是这个数，而不是"解压后写盘的内容字节"—— 开了传输压缩之后两者差 2 倍以上。
+    /// </summary>
+    public long WireBytes => Interlocked.Read(ref _wire);
 
     /// <summary>本会话发起的 HTTP 请求数（AGENT.md F8：请求数必须可观测）。</summary>
     public int Requests => Volatile.Read(ref _requests);
@@ -76,6 +83,7 @@ internal sealed class HttpFetcher : IDisposable
     public async Task<DownloadOutcome> DownloadAsync(string url, string destPath, CancellationToken ct)
     {
         var partPath = destPath + ".part";
+        var wire = 0L;   // 这一文件真正读下网线的字节（含重试、含续传前那半截）
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
@@ -149,11 +157,13 @@ internal sealed class HttpFetcher : IDisposable
                     {
                         await fs.WriteAsync(buffer.AsMemory(0, read), cts.Token).ConfigureAwait(false);
                         written += read;
+                        wire += read;
                     }
                 }
 
                 Fs.Move(partPath, destPath, overwrite: true);
-                return new DownloadOutcome(true, 200, written, string.Empty);
+                Interlocked.Add(ref _wire, wire);
+                return new DownloadOutcome(true, 200, written, string.Empty, wire);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

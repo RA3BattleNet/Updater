@@ -18,6 +18,12 @@ public sealed class Updater
     /// <summary>本会话的 HTTP 客户端，仅用于把请求数写进日志（一次只跑一个会话）。</summary>
     private HttpFetcher? _fetcher;
 
+    /// <summary>
+    /// 服务端到底有没有 <c>files/{md5}.gz</c> 预压缩变体：null = 还不知道（第一次去试），
+    /// true/false = 本会话的结论。整个会话只探测一次，不给 C8 的请求数添负担。
+    /// </summary>
+    private bool? _packedVariant;
+
 
 
 
@@ -202,11 +208,12 @@ public sealed class Updater
         async Task ProcessOneAsync(PlanEntry entry)
         {
             var t0 = Stopwatch.GetTimestamp();
-            var (action, status, reason, bytes) = await ProcessEntryAsync(entry, fetcher, cacheDir, ct)
+            var (action, status, reason, bytes, wire) = await ProcessEntryAsync(entry, fetcher, cacheDir, ct)
                 .ConfigureAwait(false);
             var ms = (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
 
             Interlocked.Add(ref tally.Bytes, bytes);
+            Interlocked.Add(ref tally.Wire, wire);
             switch (action)
             {
                 case PlanAction.Move: Interlocked.Increment(ref tally.Move); break;
@@ -217,7 +224,7 @@ public sealed class Updater
             if (status != LogStatus.Ok) Interlocked.Increment(ref tally.Fail);
 
             log.File(entry.Target.UUID.ToString("N"), entry.PredecessorHash, entry.PredecessorPath,
-                entry.Target.MD5, entry.TargetPath, ActionName(action), status, reason, bytes, ms);
+                entry.Target.MD5, entry.TargetPath, ActionName(action), status, reason, bytes, ms, wire);
 
             var n = Interlocked.Increment(ref done);
             progress?.Report(new UpdateProgress(n, totalWork, entry.Target.FileName, ActionName(action)));
@@ -302,7 +309,7 @@ public sealed class Updater
         }
     }
 
-    private async Task<(PlanAction Action, int Status, string Reason, long Bytes)> ProcessEntryAsync(
+    private async Task<(PlanAction Action, int Status, string Reason, long Bytes, long Wire)> ProcessEntryAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, CancellationToken ct)
     {
         switch (entry.Action)
@@ -314,7 +321,7 @@ public sealed class Updater
                     try
                     {
                         Fs.Place(src, entry.TargetPath);
-                        return (PlanAction.Move, LogStatus.Ok, UpdateReasons.None, 0);
+                        return (PlanAction.Move, LogStatus.Ok, UpdateReasons.None, 0, 0);
                     }
                     catch (Exception ex)
                     {
@@ -327,11 +334,12 @@ public sealed class Updater
 
             case PlanAction.Patch:
             {
-                var (ok, reason, bytes) = await TryPatchAsync(entry, fetcher, cacheDir, ct).ConfigureAwait(false);
-                if (ok) return (PlanAction.Patch, LogStatus.Ok, UpdateReasons.None, bytes);
+                var (ok, reason, bytes, wire) = await TryPatchAsync(entry, fetcher, cacheDir, ct).ConfigureAwait(false);
+                if (ok) return (PlanAction.Patch, LogStatus.Ok, UpdateReasons.None, bytes, wire);
 
+                // 补丁失败 → 回落完整下载：把已经为补丁花掉的字节也算进这一行（否则"真花了多少带宽"会少算）
                 var fallback = await FullAsync(entry, fetcher, cacheDir, reason, ct).ConfigureAwait(false);
-                return fallback;
+                return fallback with { Wire = fallback.Wire + wire };
             }
 
             default:
@@ -340,22 +348,23 @@ public sealed class Updater
     }
 
     /// <summary>尝试补丁：GET patches/{old}_{new}.hdiff，404 即回落（§3.3 / §4.3）。</summary>
-    private async Task<(bool Ok, string Reason, long Bytes)> TryPatchAsync(
+    private async Task<(bool Ok, string Reason, long Bytes, long Wire)> TryPatchAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, CancellationToken ct)
     {
         if (entry.PredecessorPath is null || entry.PredecessorHash is null || !Fs.Exists(entry.PredecessorPath))
-            return (false, UpdateReasons.NoLocal, 0);
+            return (false, UpdateReasons.NoLocal, 0, 0);
 
         var patchName = $"{entry.PredecessorHash}_{entry.Target.MD5}.hdiff";
         var patchPath = Path.Combine(cacheDir, patchName);
 
-        long bytes = 0;
+        long bytes = 0, wire = 0;
         if (!Fs.Exists(patchPath))
         {
             var got = await FetchAsync(fetcher, "patches/" + patchName, patchPath, ct).ConfigureAwait(false);
             if (!got.Ok)
-                return (false, got.StatusCode == 404 ? UpdateReasons.NoPatch : UpdateReasons.PatchFailed, 0);
+                return (false, got.StatusCode == 404 ? UpdateReasons.NoPatch : UpdateReasons.PatchFailed, 0, got.WireBytes);
             bytes = got.Bytes;
+            wire = got.WireBytes;
         }
 
         var outPath = patchPath + ".out";
@@ -365,7 +374,7 @@ public sealed class Updater
                 .ConfigureAwait(false))
         {
             Fs.Delete(patchPath);
-            return (false, UpdateReasons.PatchFailed, bytes);
+            return (false, UpdateReasons.PatchFailed, bytes, wire);
         }
 
         if (!string.Equals(
@@ -374,36 +383,43 @@ public sealed class Updater
         {
             Fs.Delete(outPath);
             Fs.Delete(patchPath);
-            return (false, UpdateReasons.PatchFailed, bytes);
+            return (false, UpdateReasons.PatchFailed, bytes, wire);
         }
 
         Fs.Place(outPath, entry.TargetPath);
-        return (true, UpdateReasons.None, bytes);
+        return (true, UpdateReasons.None, bytes, wire);
     }
 
-    /// <summary>完整下载：GET files/{md5}，按内容寻址天然去重（§3.2）。</summary>
-    private async Task<(PlanAction Action, int Status, string Reason, long Bytes)> FullAsync(
+    /// <summary>
+    /// 完整下载：优先取服务端的**预压缩变体** `files/{md5}.gz`，取不到再取 `files/{md5}`（§3.2 / §4.6）。
+    /// 【必须】下载完要**校验**（§4.3 ⑥），而且校验发生在放到目标路径之前 ——
+    /// 这是唯一能挡住"传完了但内容是坏的"（代理返回垃圾、传输被截断…）的一步。
+    /// </summary>
+    private async Task<(PlanAction Action, int Status, string Reason, long Bytes, long Wire)> FullAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, string reason, CancellationToken ct)
     {
         var blob = Path.Combine(cacheDir, entry.Target.MD5);
         var gate = _blobLocks.GetOrAdd(blob, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct).ConfigureAwait(false);
 
-        long bytes = 0;
+        long bytes = 0, wire = 0;
         try
         {
-            var blobOk = Fs.Exists(blob)
-                && string.Equals(
-                    await Hashing.Md5FileAsync(blob, ct).ConfigureAwait(false),
-                    entry.Target.MD5, StringComparison.OrdinalIgnoreCase);
-
-            if (!blobOk)
+            if (!await BlobIsGoodAsync(blob, entry.Target.MD5, ct).ConfigureAwait(false))
             {
                 Fs.Delete(blob);
-                var got = await FetchAsync(fetcher, "files/" + entry.Target.MD5, blob, ct).ConfigureAwait(false);
+                var got = await FetchFullAsync(fetcher, entry.Target.MD5, blob, ct).ConfigureAwait(false);
                 if (!got.Ok)
-                    return (PlanAction.Full, LogStatus.RetryExceeded, UpdateReasons.DownloadFailed, 0);
+                    return (PlanAction.Full, LogStatus.RetryExceeded, UpdateReasons.DownloadFailed, 0, got.WireBytes);
+
                 bytes = got.Bytes;
+                wire = got.WireBytes;
+
+                if (!await BlobIsGoodAsync(blob, entry.Target.MD5, ct).ConfigureAwait(false))
+                {
+                    Fs.Delete(blob);
+                    return (PlanAction.Full, LogStatus.VerifyFailed, UpdateReasons.VerifyFailed, bytes, wire);
+                }
             }
 
             try
@@ -412,7 +428,7 @@ public sealed class Updater
             }
             catch (Exception ex)
             {
-                return (PlanAction.Full, LogStatus.IoError, Classify(ex), bytes);
+                return (PlanAction.Full, LogStatus.IoError, Classify(ex), bytes, wire);
             }
         }
         finally
@@ -420,8 +436,82 @@ public sealed class Updater
             gate.Release();
         }
 
-        return (PlanAction.Full, LogStatus.Ok, reason, bytes);
+        return (PlanAction.Full, LogStatus.Ok, reason, bytes, wire);
     }
+
+    private static async Task<bool> BlobIsGoodAsync(string blob, string expectedMd5, CancellationToken ct) =>
+        Fs.Exists(blob)
+        && string.Equals(await Hashing.Md5FileAsync(blob, ct).ConfigureAwait(false), expectedMd5, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 取一个完整文件，**返回 Ok 即保证 <paramref name="blob"/> 的内容等于 <paramref name="md5"/>**
+    /// （§4.3 ⑥：完整下载之后必须校验，且校验发生在放到目标路径之前）。
+    ///
+    /// 顺序：先试预压缩变体 <c>files/{md5}.gz</c>，拿到的字节按下面三条判断 ——
+    /// **不靠猜魔数、靠验哈希**：
+    /// <list type="number">
+    /// <item>字节本身就已经等于目标内容（主机按 <c>Content-Encoding</c> 替我们解过了）→ 直接用；</item>
+    /// <item>是完整的 gzip 流 → 解压，再验；</item>
+    /// <item>都不是（对象损坏、是个拦路 HTML…）→ 删掉，**本会话不再信任压缩变体**，回落原文件。</item>
+    /// </list>
+    /// 服务器没有该变体（404）时同样回落原文件，并记住结论，不让每个文件都去问一次。
+    /// </summary>
+    private async Task<DownloadOutcome> FetchFullAsync(
+        HttpFetcher fetcher, string md5, string blob, CancellationToken ct)
+    {
+        var raw = "files/" + md5;
+        var wire = 0L;
+
+        if (_cfg.UseCompressedFiles && _packedVariant != false)
+        {
+            var gzPath = blob + ".gz";
+            var got = await FetchAsync(fetcher, raw + ".gz", gzPath, ct).ConfigureAwait(false);
+            wire += got.WireBytes;
+
+            if (got.Ok)
+            {
+                // 情况一：拿到的就是目标内容（主机替我们解过了）
+                if (await IsContentAsync(gzPath, md5, ct).ConfigureAwait(false))
+                {
+                    Fs.Move(gzPath, blob, overwrite: true);
+                }
+                // 情况二：是完整的 gzip 流 → 解压再验
+                else if (Fs.LooksGzipped(gzPath) && Fs.TryGunzip(gzPath, blob)
+                         && await IsContentAsync(blob, md5, ct).ConfigureAwait(false))
+                {
+                    Fs.Delete(gzPath);
+                }
+                // 情况三：既不是内容、也不是能解的 gzip → 不信这台服务器的 .gz 了
+                else
+                {
+                    Fs.Delete(gzPath);
+                    Fs.Delete(blob);
+                    _packedVariant = false;
+                    var fallback = await FetchAsync(fetcher, raw, blob, ct).ConfigureAwait(false);
+                    return fallback with { WireBytes = wire + fallback.WireBytes };
+                }
+
+                if (_packedVariant is null) _packedVariant = true;
+                return got with
+                {
+                    Bytes = Fs.Exists(blob) ? Fs.Length(blob) : got.Bytes,
+                    WireBytes = wire,
+                };
+            }
+
+            if (got.StatusCode != 404)
+                return got with { WireBytes = wire };   // 网络层错误：如实上报
+
+            if (_packedVariant is null) _packedVariant = false;   // 服务器没有这套东西，别再问了
+        }
+
+        var rawGot = await FetchAsync(fetcher, raw, blob, ct).ConfigureAwait(false);
+        return rawGot with { WireBytes = wire + rawGot.WireBytes };
+    }
+
+    private static async Task<bool> IsContentAsync(string path, string expectedMd5, CancellationToken ct) =>
+        Fs.Exists(path)
+        && string.Equals(await Hashing.Md5FileAsync(path, ct).ConfigureAwait(false), expectedMd5, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>按主地址 + 备用地址顺序取资源（§4.6 多源回退）。404 也继续试下一个源 —— 配了备用源就意味着"同一份内容可能只在其中一个源上"。</summary>
     private async Task<DownloadOutcome> FetchAsync(HttpFetcher fetcher, string relative, string dest, CancellationToken ct)
@@ -447,10 +537,13 @@ public sealed class Updater
     private UpdateResult Finish(UpdateLog log, Tally t, Stopwatch sw, UpdateOutcome outcome, string reason, string detail, string httpVersion = "")
     {
         sw.Stop();
+        // R 行的 wire 用**会话总计**（含 manifest 本身），这正是"这次更新一共花了多少带宽"
+        var wire = _fetcher?.WireBytes ?? 0;
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
-            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0);
+            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, wire);
 
-        return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed, detail, httpVersion);
+        return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
+            sw.Elapsed, detail, httpVersion, wire);
     }
 
     private static void SaveEtag(string etagPath, string? etag)
@@ -493,6 +586,7 @@ public sealed class Updater
         public int Full;
         public int Fail;
         public long Bytes;
+        public long Wire;
         public string ManifestHash = string.Empty;
     }
 }

@@ -59,6 +59,17 @@ public sealed record UpdateConfig
     /// <summary>占比判据生效的最小文件数；避免小规模产品误判。</summary>
     public int FullPackageRatioMinFiles { get; init; } = 50;
 
+    /// <summary>
+    /// 完整文件是否优先取服务端的**预压缩变体** `files/{md5}.gz`（AGENT.md §4.6）。默认开启。
+    ///
+    /// 为什么由客户端显式请求、而不是靠边缘 <c>Content-Encoding</c>：那需要主机支持
+    /// `gzip_static` 之类的规则 —— 不能当默认前提。客户端自己请求自己解压则**不依赖任何主机特性**，
+    /// 而且 **Range 断点续传仍然可用**（Range 打在压缩字节上，下完再解压）。
+    /// URL 与 manifest 仍是未压缩内容的 md5，压缩纯粹是传输层的事。
+    /// 服务器没有该变体时，每会话只多一次 404 探测。
+    /// </summary>
+    public bool UseCompressedFiles { get; init; } = true;
+
     /// <summary>日志路径。默认 {CacheDir}/update.log。</summary>
     public string? LogPath { get; init; }
 

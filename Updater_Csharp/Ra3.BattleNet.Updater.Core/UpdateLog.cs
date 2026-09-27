@@ -56,18 +56,21 @@ internal sealed class UpdateLog : IDisposable
     /// <summary>每文件一行。</summary>
     public void File(
         string uuid, string? oldMd5, string? oldPath, string? newMd5, string? newPath,
-        string action, int status, string reason, long bytes, long ms)
+        string action, int status, string reason, long bytes, long ms, long wire = 0)
     {
-        Write($"F\t{RunId}\t{uuid}\t{oldMd5}\t{oldPath}\t{newMd5}\t{newPath}\t{action}\t{status}\t{reason}\t{bytes}\t{ms}");
+        // wire 是**追加在行尾**的新列（§4.11 只允许往行尾追加）：
+        // bytes = 内容字节（解压后写盘的量），wire = 真正走网线的字节（压缩后）。
+        // 开了传输压缩之后两者会差 2 倍以上，比"省了多少带宽"必须看后者。
+        Write($"F\t{RunId}\t{uuid}\t{oldMd5}\t{oldPath}\t{newMd5}\t{newPath}\t{action}\t{status}\t{reason}\t{bytes}\t{ms}\t{wire}");
     }
 
     /// <summary>每轮一行（收尾）。result 是增量命中率与节省量的唯一现场证据。</summary>
     public void Run(
         string manifestHash, int total, int skip, int move, int patch, int full, int fail,
-        long bytes, long ms, string result, long requests = 0)
+        long bytes, long ms, string result, long requests = 0, long wire = 0)
     {
-        // requests 是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）
-        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}");
+        // requests / wire 都是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）
+        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}\t{wire}");
     }
 
     private void Write(string line)

@@ -27,6 +27,44 @@ public static class PatchGenerator
     /// </summary>
     public const long DefaultMinFileSize = 0;
 
+    /// <summary>
+    /// 给 <c>files/{md5}</c> 生成预压缩旁挂 <c>files/{md5}.gz</c>。
+    /// 已存在且比原文件小就跳过（幂等：重跑发布流水线不会白压一遍 1 GB）。
+    /// **不追求字节确定性**：URL 的键是未压缩内容的 md5，客户端解压后照样校验那个 md5，
+    /// 所以换个压缩级别、换个工具版本都不会影响正确性（这点和"把压缩字节当内容身份"完全不同）。
+    /// </summary>
+    private static void WriteGzipSibling(string rawPath)
+    {
+        var gzPath = rawPath + ".gz";
+        try
+        {
+            var rawLength = new FileInfo(rawPath).Length;
+            if (File.Exists(gzPath) && new FileInfo(gzPath).Length < rawLength) return;
+
+            var tmp = gzPath + ".tmp";
+            using (var input = new FileStream(rawPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
+            using (var output = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+            using (var gz = new System.IO.Compression.GZipStream(output, System.IO.Compression.CompressionLevel.Optimal))
+                input.CopyTo(gz, 1 << 20);
+
+            // **压不动就不写**：小文件（几十字节的配置）gzip 之后反而更大，
+            // 已经压过的二进制也压不动。客户端对这类文件本来就会 404 回落原文件，
+            // 所以"有的文件有 .gz、有的没有"是完全正常的状态。
+            if (new FileInfo(tmp).Length >= rawLength)
+            {
+                File.Delete(tmp);
+                File.Delete(gzPath);   // 顺手清掉可能存在的旧旁挂
+                return;
+            }
+
+            File.Move(tmp, gzPath, overwrite: true);
+        }
+        catch
+        {
+            // 压不出来不影响正确性：客户端会 404 → 回落原文件
+        }
+    }
+
     public static PatchGenerationSummary Generate(
         string newManifestPath,
         string newRoot,
@@ -35,7 +73,8 @@ public static class PatchGenerator
         long minFileSize = DefaultMinFileSize,
         bool verify = true,
         bool prune = false,
-        string? toolsDir = null)
+        string? toolsDir = null,
+        bool compressFiles = true)
     {
         var tools = toolsDir ?? AppContext.BaseDirectory;
         var filesDir = Path.Combine(outputDir, "files");
@@ -58,9 +97,17 @@ public static class PatchGenerator
             var full = FullPath(newRoot, f);
             if (!File.Exists(full)) continue;
             var target = Path.Combine(filesDir, f.MD5);
-            if (File.Exists(target)) continue;
-            File.Copy(full, target, overwrite: true);
-            copied++;
+            if (!File.Exists(target))
+            {
+                File.Copy(full, target, overwrite: true);
+                copied++;
+            }
+
+            // 预压缩变体 files/{md5}.gz（AGENT.md §4.6）：
+            // **客户端显式请求它、自己解压** —— 不依赖边缘任何能力（gzip_static / Content-Encoding 都不用）。
+            // 原文件必须同时保留：老客户端、或关掉该功能的客户端走的就是原文件那条路。
+            if (compressFiles)
+                WriteGzipSibling(target);
         }
 
         foreach (var baseline in baselines)

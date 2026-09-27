@@ -53,9 +53,9 @@ public class LogFormatTests
         Assert.Equal(2, fLines.Count);
         Assert.Single(rLines);
 
-        // 列数写死：F=12 列、R=13 列（requests 是追加在行尾的列）
-        Assert.All(fLines, l => Assert.Equal(12, l.Split('\t').Length));
-        Assert.Equal(13, rLines[0].Split('\t').Length);
+        // 列数写死：F=13 列、R=14 列（requests / wire 都是追加在行尾的列）
+        Assert.All(fLines, l => Assert.Equal(13, l.Split('\t').Length));
+        Assert.Equal(14, rLines[0].Split('\t').Length);
 
         // action / status 是封闭集合
         var actions = new[] { "skip", "move", "patch", "full" };
@@ -69,6 +69,7 @@ public class LogFormatTests
             Assert.Matches("^[0-9a-f]{32}$", c[5]);        // new_md5
             Assert.True(long.TryParse(c[10], out _));      // bytes
             Assert.True(long.TryParse(c[11], out _));      // ms
+            Assert.True(long.TryParse(c[12], out _));      // wire（真正走网线的字节）
         }
 
         var r = rLines[0].Split('\t');
@@ -80,6 +81,7 @@ public class LogFormatTests
         Assert.Equal(result.BytesDownloaded, long.Parse(r[9]));
         Assert.Equal("Updated", r[11]);
         Assert.True(int.Parse(r[12]) > 0, "requests 列必须被填写（F8）");
+        Assert.True(long.Parse(r[13]) > 0, "wire 列必须被填写（真正走网线的字节）");
     }
 
     [Fact]
