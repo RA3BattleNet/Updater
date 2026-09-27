@@ -25,6 +25,7 @@ public class GzipTransferTests
         TestSupport.WriteTree(v2,
             ("bin/a.dll", TestSupport.Big("V2-A", 64 * 1024)),
             ("bin/b.dll", TestSupport.Big("V2-B", 48 * 1024)),
+            ("bin/c.dll", TestSupport.Big("BRAND-NEW", 256 * 1024)),   // 新增 → 必然完整下载
             ("data/keep.txt", "unchanged"));
 
         var m1 = Path.Combine(tmp.Path, "v1.xml");
@@ -67,8 +68,11 @@ public class GzipTransferTests
 
         // 客户端统计的 bytes 是**解压后**的内容字节 —— 这是"内容变了多少"，
         // 不是"网线上走了多少"。要与整包比带宽，得看 CDN 的出口统计（见 §2.2.1）。
-        Assert.True(result.BytesDownloaded > 100 * 1024,
-            $"客户端应当按解压后的内容字节计数，实得 {result.BytesDownloaded}");
+        // 客户端按**解压后写盘**的字节计数（"内容变了多少"），不是网线字节。
+        // bin/c.dll 是新文件、必然完整下载，所以这里有个下界可以断言。
+        Assert.Equal(1, result.Full);
+        Assert.True(result.BytesDownloaded >= 256 * 1024,
+            $"客户端应当按解压后的内容字节计数（新增文件 256KB），实得 {result.BytesDownloaded}");
     }
 
     [Fact]
