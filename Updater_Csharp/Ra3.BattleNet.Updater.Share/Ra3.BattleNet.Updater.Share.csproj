@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -9,6 +9,12 @@
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Serilog" Version="4.3.0" />
+  </ItemGroup>
+
+  <!-- 外部差分工具必须随产物部署（AGENT.md §7.1 / K15） -->
+  <ItemGroup>
+    <Content Include="hdiffpatch_bin\win-x86\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="hdiffpatch_bin\win-x64\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

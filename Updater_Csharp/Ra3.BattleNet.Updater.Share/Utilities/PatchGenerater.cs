@@ -1,35 +1,20 @@
-﻿using System.Diagnostics;
-using static Ra3.BattleNet.Updater.Share.Utilities.PublicMethod;
+using Ra3.BattleNet.Updater.Share.Log;
 
-namespace Ra3.BattleNet.Updater.Share.Utilities
+namespace Ra3.BattleNet.Updater.Share.Utilities;
+
+/// <summary>
+/// 生成 HDiffPatch 补丁。
+/// **必须**检查外部进程退出码并如实返回（AGENT.md §5.3：禁止吞错）。
+/// </summary>
+public class PatchGenerater
 {
-    public class PatchGenerater
+    public static bool GeneratePatch(string oldFile, string newFile, string deltaFile)
     {
-        public static bool GeneratePatch(string oldFile, string newFile, string deltaFile)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = GetHdiffzPath(),
-                Arguments = $"-s -f \"{oldFile}\" \"{newFile}\" \"{deltaFile}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using (Process? process = Process.Start(psi))
-            {
-                string output = process.StandardOutput.ReadToEnd();
-                Console.WriteLine(output);
-                process.WaitForExit();
-
-                if (process.ExitCode != 0)
-                {
-                    string error = process.StandardError.ReadToEnd();
-                    Console.WriteLine($"补丁程序出现错误：{Environment.NewLine}{error}");
-                }
-            }
+        var toolsDir = AppContext.BaseDirectory;
+        if (HdiffTool.Generate(toolsDir, oldFile, newFile, deltaFile, out var error))
             return true;
-        }
+
+        Logger.Fail($"生成补丁失败：{error}{Environment.NewLine}");
+        return false;
     }
 }
