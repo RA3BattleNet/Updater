@@ -45,7 +45,8 @@ public class ManifestGenerationTests
         var m1 = Path.Combine(tmp.Path, "v1.xml");
         ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
 
-        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        // 这条专门测"关了自动关联时，报告要给出可执行的人工建议"
+        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.Off);
 
         Assert.Equal(1, gen.Unchanged.Count);   // keep.txt
         Assert.Equal(1, gen.Modified.Count);    // mod.txt
@@ -78,7 +79,7 @@ public class ManifestGenerationTests
         var m1 = Path.Combine(tmp.Path, "v1.xml");
         ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
 
-        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.Off);
         var report = ManifestGenerator.FormatReport(gen, m1, v1);
 
         Assert.Equal(1, gen.Added.Count);
@@ -135,7 +136,8 @@ public class ManifestGenerationTests
         var m1 = Path.Combine(tmp.Path, "v1.xml");
         ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
 
-        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        // 同样是"人工建议"路径：自动关联关掉时才要求报告指出改哪一个 UUID
+        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.Off);
         var report = ManifestGenerator.FormatReport(gen, m1, v1);
 
         Assert.Equal(2, gen.Added.Count);
@@ -145,7 +147,7 @@ public class ManifestGenerationTests
     }
 }
 /// <summary>
-/// 自动关联改名（`XmlGenerator --auto-link-uuids`）。
+/// 自动关联改名（`XmlGenerator` 默认行为，`--no-auto-link-uuids` 可关）。
 /// 猜的逻辑：**同名优先 → 尺寸窗口兜底 → 贪心 1:1**。理由与实测见 XmlGenerator/README.md。
 /// </summary>
 public class AutoLinkTests
@@ -168,10 +170,11 @@ public class AutoLinkTests
         var m1 = Path.Combine(tmp.Path, "v1.xml");
         ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
 
-        var off = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
-        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.ByNameAndSize);
+        // 默认（不传参数）就已经关联上了
+        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        // 显式关掉：确定性规则认不出来 → 记成新增/消失
+        var off = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.Off);
 
-        // 不开开关：认不出来 → 新增/消失
         Assert.Equal(1, off.Added.Count);
         Assert.Equal(1, off.Removed.Count);
         Assert.Empty(off.AutoLinked);
@@ -263,7 +266,7 @@ public class AutoLinkTests
     }
 
     [Fact]
-    public void OffIsTheDefault_SoBehaviourIsUnchanged()
+    public void AutoLinkIsOnByDefault_AndCanBeTurnedOff()
     {
         using var tmp = new TempDir();
         var v1 = tmp.Sub("v1");
@@ -274,7 +277,33 @@ public class AutoLinkTests
         var m1 = Path.Combine(tmp.Path, "v1.xml");
         ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
 
-        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);   // 不传 autoLink
-        Assert.Empty(on.AutoLinked);
+        // 默认（不传参数）就应当关联上 —— 需求方 2026-09-27 决定默认打开
+        var dflt = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        Assert.Single(dflt.AutoLinked);
+
+        // 显式关掉
+        var off = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.Off);
+        Assert.Empty(off.AutoLinked);
+    }
+
+    /// <summary>默认打开之后，报告不能又让人去改一个已经自动改好的 UUID。</summary>
+    [Fact]
+    public void AutoLinkedPairs_DoNotReappearInTheHumanConfirmationList()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+        TestSupport.WriteTree(v1, ("bin/a.dll", TestSupport.Big("A1", 8192)));
+        TestSupport.WriteTree(v2, ("dotnet/a.dll", TestSupport.Big("A2", 8192)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        var report = ManifestGenerator.FormatReport(gen, m1, v1);
+
+        Assert.Single(gen.AutoLinked);
+        Assert.Contains("已自动关联改名 1 对", report);
+        Assert.DoesNotContain("➜ 操作", report);           // 已经改好了，别再让人改一遍
     }
 }

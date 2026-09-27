@@ -23,13 +23,13 @@ public sealed record RenameLink(ManifestFile Added, ManifestFile Removed, Rename
 /// <summary>自动关联 UUID 的模式。</summary>
 public enum AutoLinkMode
 {
-    /// <summary>不做（默认）：保持原有行为，只接受 (FileName,Path) 与 MD5 两条继承规则。</summary>
+    /// <summary>不做：只接受 (FileName,Path) 与 MD5 两条确定性继承规则。</summary>
     Off,
 
     /// <summary>只按同名关联（保守）。</summary>
     ByName,
 
-    /// <summary>同名优先，再按尺寸窗口兜底。</summary>
+    /// <summary>同名优先，再按尺寸窗口兜底。**默认**（实测 v4→v5 命中率 4.7% → 76.5%）。</summary>
     ByNameAndSize,
 }
 
@@ -70,7 +70,7 @@ public static class ManifestGenerator
         IReadOnlyList<string> excludeDirs,
         string? oldRoot = null,
         string? toolsDir = null,
-        AutoLinkMode autoLink = AutoLinkMode.Off)
+        AutoLinkMode autoLink = AutoLinkMode.ByNameAndSize)
     {
         var basePath = Path.GetFullPath(targetDir);
         var excluded = new HashSet<string>(
@@ -404,23 +404,34 @@ public static class ManifestGenerator
                 sb.AppendLine($"    候选 {r.ProbeCandidates} 对（按文件大小接近度取前 {r.ProbedPairs} 对探测；" +
                               "新增/消失规模较大时这不代表它们是改名）");
 
-            if (r.SuspectRenames.Count == 0)
+            // 已经自动关联过的（按新增条目路径认）不该再建议人工改一次
+            var linkedPaths = new HashSet<string>(r.AutoLinked.Select(l => l.Added.RelativePath()),
+                StringComparer.OrdinalIgnoreCase);
+            var openSuspects = r.SuspectRenames
+                .Where(c => !linkedPaths.Contains(c.Added.RelativePath())).ToList();
+
+            if (r.AutoLinked.Count > 0 && r.SuspectRenames.Count > openSuspects.Count)
+                sb.AppendLine($"    （已自动关联的 {r.SuspectRenames.Count - openSuspects.Count} 对不再在此重复列出）");
+
+            if (openSuspects.Count == 0)
             {
-                sb.AppendLine($"    未发现疑似改名（已探测 {r.ProbedPairs} 对，补丁率均 ≥ {SuspectRenameRatio:P0}）。");
+                sb.AppendLine(r.AutoLinked.Count > 0
+                    ? $"    没有剩余需要人工确认的了（{r.AutoLinked.Count} 对已自动关联）。"
+                    : $"    未发现疑似改名（已探测 {r.ProbedPairs} 对，补丁率均 ≥ {SuspectRenameRatio:P0}）。");
                 sb.AppendLine();
                 sb.AppendLine("  提示: 新增/消失数量大时通常是整块内容替换（例如新打包了一整套运行时），不是改名。");
                 return sb.ToString();
             }
 
-            foreach (var c in r.SuspectRenames.Take(MaxReportedCandidates))
+            foreach (var c in openSuspects.Take(MaxReportedCandidates))
             {
                 var pct = c.PatchRatio is null ? "?" : $"{c.PatchRatio:P0}";
                 sb.AppendLine($"    ? 新增:     /{c.Added.RelativePath()}   hash {c.Added.MD5}");
                 sb.AppendLine($"      疑似前身: /{c.Removed.RelativePath()}  hash {c.Removed.MD5}   (补丁率 {pct})");
                 sb.AppendLine($"      ➜ 操作: 把新增条目的 <UUID> 改成 {c.Removed.UUID:N}");
             }
-            if (r.SuspectRenames.Count > MaxReportedCandidates)
-                sb.AppendLine($"    …另有 {r.SuspectRenames.Count - MaxReportedCandidates} 条疑似未列出（补丁率最低的已列在前面）");
+            if (openSuspects.Count > MaxReportedCandidates)
+                sb.AppendLine($"    …另有 {openSuspects.Count - MaxReportedCandidates} 条疑似未列出（补丁率最低的已列在前面）");
 
             sb.AppendLine();
             sb.AppendLine("  提示: 漏改的重命名会让该文件从「增量」退化为「全量」，且不会报错。");
