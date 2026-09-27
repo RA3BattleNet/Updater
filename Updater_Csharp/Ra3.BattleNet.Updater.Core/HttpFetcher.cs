@@ -89,7 +89,16 @@ internal sealed class HttpFetcher : IDisposable
             try
             {
                 using var req = NewRequest(url);
-                if (existing > 0) req.Headers.Range = new RangeHeaderValue(existing, null);
+                if (existing > 0)
+                {
+                    req.Headers.Range = new RangeHeaderValue(existing, null);
+
+                    // 续传必须拿**未压缩**的字节：Range 一旦打在 gzip 流上，客户端拿到的是半截流，
+                    // 解压必然失败（而且失败得很难看懂）。代价是"续传的那一次"没享受压缩，
+                    // 第一次（非续传）仍然照常压 —— 这比"续传彻底不可用"划算得多。
+                    req.Headers.AcceptEncoding.Clear();
+                    req.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("identity"));
+                }
 
                 using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token)
                     .ConfigureAwait(false);

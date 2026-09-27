@@ -63,6 +63,30 @@ internal sealed class TestHttpServer : IDisposable
     /// <summary>true 时所有 <c>/patches/</c> 请求都返回 404（模拟"服务端没有该内容对的补丁"）。</summary>
     public bool PatchNotFound { get; set; }
 
+    /// <summary>
+    /// true 时对 <c>files/</c>、<c>patches/</c> 的响应做 gzip 压缩并带 <c>Content-Encoding: gzip</c>
+    /// （模拟"服务端/边缘给二进制也开了压缩"）。清单不压。
+    /// 行为与真实静态服务器一致：客户端要 <c>identity</c>、或请求带 <c>Range</c> 时，都退化为不压缩。
+    /// </summary>
+    public bool CompressPayloads { get; set; }
+
+    /// <summary>
+    /// 敌意变体：即使请求带 <c>Range</c>（续传）也照样压、并且把 Range 打在**压缩后**的字节上，
+    /// 同时无视 <c>Accept-Encoding: identity</c>。用来验证"服务端不守规矩时客户端不会静默损坏"。
+    /// </summary>
+    public bool NaiveRangeOverCompressed { get; set; }
+
+    /// <summary>带 <c>Content-Encoding: gzip</c> 的响应数。</summary>
+    public int CompressedResponses => Volatile.Read(ref _compressed);
+
+    /// <summary>**真正写到网线上的**响应体字节数（压缩后）。用来区分"内容字节"与"传输字节"。</summary>
+    public long WireBytesSent => Interlocked.Read(ref _wire);
+
+    public void ResetWire() => Interlocked.Exchange(ref _wire, 0);
+
+    private int _compressed;
+    private long _wire;
+
     public TestHttpServer(string root)
     {
         _root = Path.GetFullPath(root);
@@ -178,6 +202,20 @@ internal sealed class TestHttpServer : IDisposable
                 }
             }
 
+            // gzip 传输（只压载荷，不压清单）
+            var isManifest = urlPath.EndsWith("manifest.xml", StringComparison.OrdinalIgnoreCase);
+            var wantsGzip = (LastAcceptEncoding ?? string.Empty).Contains("gzip", StringComparison.OrdinalIgnoreCase);
+            var askedIdentity = (LastAcceptEncoding ?? string.Empty).Contains("identity", StringComparison.OrdinalIgnoreCase);
+
+            if (CompressPayloads && !isManifest && wantsGzip && (!askedIdentity || NaiveRangeOverCompressed))
+            {
+                var gz = Gzip(bytes);
+                Interlocked.Increment(ref _compressed);
+                WriteResponse(stream, 200, "OK",
+                    [("ETag", etag), ("Accept-Ranges", "bytes"), ("Content-Encoding", "gzip")], gz);
+                return;
+            }
+
             // 只截断载荷：清单本身要保持完整，否则测的就不是"载荷截断"了
             if (TruncateBytes > 0 && bytes.Length > TruncateBytes
                 && !urlPath.EndsWith("manifest.xml", StringComparison.OrdinalIgnoreCase))
@@ -201,6 +239,14 @@ internal sealed class TestHttpServer : IDisposable
         return File.Exists(full) ? full : null;
     }
 
+    private static byte[] Gzip(byte[] data)
+    {
+        using var ms = new MemoryStream();
+        using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+            gz.Write(data);
+        return ms.ToArray();
+    }
+
     private static void WriteTruncatedResponse(Stream stream, int declaredLength, byte[] partial, string etag)
     {
         var head = System.Text.Encoding.ASCII.GetBytes(
@@ -210,7 +256,7 @@ internal sealed class TestHttpServer : IDisposable
         stream.Flush();   // 内容不足就关连接 → 客户端应判定响应截断
     }
 
-    private static void WriteResponse(Stream stream, int code, string reason, (string, string)[] headers, byte[] body)
+    private void WriteResponse(Stream stream, int code, string reason, (string, string)[] headers, byte[] body)
     {
         var sb = new StringBuilder();
         sb.Append($"HTTP/1.1 {code} {reason}\r\n");
@@ -222,6 +268,7 @@ internal sealed class TestHttpServer : IDisposable
         stream.Write(head);
         if (body.Length > 0) stream.Write(body);
         stream.Flush();
+        Interlocked.Add(ref _wire, head.Length + body.Length);
     }
 
     public void Dispose()
