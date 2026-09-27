@@ -31,6 +31,12 @@ internal sealed class TestHttpServer : IDisposable
     /// <summary>最近一次请求的 Accept-Encoding，用于验证客户端确实开启了透明压缩。</summary>
     public string? LastAcceptEncoding { get; private set; }
 
+    /// <summary>&gt;0 时：声明完整 Content-Length，但实际少发这么多字节（模拟响应截断）。</summary>
+    public int TruncateBytes { get; set; }
+
+    /// <summary>是否支持 Range（206）。关掉它就能测「截断后无法续传」的路径。</summary>
+    public bool SupportRange { get; set; } = true;
+
     public TestHttpServer(string root)
     {
         _root = Path.GetFullPath(root);
@@ -104,7 +110,7 @@ internal sealed class TestHttpServer : IDisposable
                 return;
             }
 
-            if (range is not null && range.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
+            if (SupportRange && range is not null && range.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
             {
                 var spec = range[6..].Split('-')[0];
                 if (long.TryParse(spec, out var from) && from < bytes.Length)
@@ -116,6 +122,14 @@ internal sealed class TestHttpServer : IDisposable
                         slice);
                     return;
                 }
+            }
+
+            // 只截断载荷：清单本身要保持完整，否则测的就不是"载荷截断"了
+            if (TruncateBytes > 0 && bytes.Length > TruncateBytes
+                && !urlPath.EndsWith("manifest.xml", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteTruncatedResponse(stream, bytes.Length, bytes[..(bytes.Length - TruncateBytes)], etag);
+                return;
             }
 
             WriteResponse(stream, 200, "OK", [("ETag", etag), ("Accept-Ranges", "bytes")], bytes);
@@ -131,6 +145,15 @@ internal sealed class TestHttpServer : IDisposable
         var full = Path.GetFullPath(Path.Combine(_root, rel));
         if (!full.StartsWith(_root, StringComparison.OrdinalIgnoreCase)) return null;
         return File.Exists(full) ? full : null;
+    }
+
+    private static void WriteTruncatedResponse(Stream stream, int declaredLength, byte[] partial, string etag)
+    {
+        var head = System.Text.Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Length: {declaredLength}\r\nETag: {etag}\r\nConnection: close\r\n\r\n");
+        stream.Write(head);
+        stream.Write(partial);
+        stream.Flush();   // 内容不足就关连接 → 客户端应判定响应截断
     }
 
     private static void WriteResponse(Stream stream, int code, string reason, (string, string)[] headers, byte[] body)
