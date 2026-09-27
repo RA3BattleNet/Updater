@@ -65,10 +65,17 @@ internal static class TestSupport
     public static ManifestModel NewManifest(string version = "1.0.0")
         => new(new Version(version), "test");
 
+    /// <summary>
+    /// 造一条清单条目。UUID **由 (目录, 文件名) 确定性派生** —— 和服务端生成器的规则一致
+    /// （`ManifestGenerator.DeterministicUuid`）：真实的"同路径 ⇒ 同 UUID"因此自动成立。
+    /// 需要"同一路径换了 UUID"这种异常场景时，测试自己显式改 <c>UUID</c>。
+    /// </summary>
     public static ManifestFile Add(ManifestModel m, string fileName, string dir, string md5,
         FileModeEnum mode = FileModeEnum.Auto)
     {
-        var f = new ManifestFile(Guid.NewGuid(), fileName, md5, dir, "1.0.0",
+        var seed = Md5((dir ?? string.Empty).Replace('\\', '/').Trim('/') + "/" + fileName);
+        var uuid = new Guid(Convert.FromHexString(seed));
+        var f = new ManifestFile(uuid, fileName, md5, dir, "1.0.0",
             FileTypeEnum.Bin, mode, "TEST;");
         m.Manifest.Files.Add(f);
         return f;

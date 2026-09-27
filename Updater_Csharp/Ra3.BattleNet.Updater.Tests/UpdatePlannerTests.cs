@@ -46,9 +46,9 @@ public class UpdatePlannerTests
     }
 
     [Fact]
-    public void UuidMatch_WinsOverPath_SoRenameWithChangedContent_StillPatches()
+    public void UuidMatch_IsTheOnlyIdentity_SoARenameWithChangedContentStillPatches()
     {
-        // 场景：路径变了 + 内容也变了，人工把新条目的 UUID 改成旧条目的（AGENT.md §3.4 / §9.2）
+        // 场景：路径变了 + 内容也变了，服务端在发布时把新条目的 UUID 改成了旧条目的（AGENT.md §3.4 / §9.2）
         var local = TestSupport.NewManifest();
         var old = TestSupport.Add(local, "old.txt", "\\", TestSupport.Md5("V1"));
 
@@ -62,6 +62,30 @@ public class UpdatePlannerTests
         Assert.Equal(PlanAction.Patch, entry.Action);
         Assert.Equal(TestSupport.Md5("V1"), entry.PredecessorHash);
         Assert.EndsWith("old.txt", entry.PredecessorPath);
+    }
+
+    /// <summary>
+    /// 【已决策 2026-09-28】文件身份**只有 UUID**：同路径、同内容，但 UUID 不同 → 视为**新文件**。
+    /// 客户端**不替服务端补正失误**（同路径换 UUID 是发布侧该维护好的事）；
+    /// 也不允许拿"同路径的本地文件"当补丁前身（猜错就是把两个不同文件接在一起）。
+    /// 正常流程不受影响：服务端保证"同路径 ⇒ 同 UUID"（路径派生 + 同路径继承）。
+    /// </summary>
+    [Fact]
+    public void DifferentUuid_IsANewFile_EvenAtTheSamePathAndSameContent()
+    {
+        var local = TestSupport.NewManifest();
+        TestSupport.Add(local, "same-content.txt", "\\", TestSupport.Md5("A"));
+        TestSupport.Add(local, "changed.txt", "\\", TestSupport.Md5("B1"));
+
+        var remote = TestSupport.NewManifest("2.0.0");
+        TestSupport.Add(remote, "same-content.txt", "\\", TestSupport.Md5("A")).UUID = Guid.NewGuid();
+        TestSupport.Add(remote, "changed.txt", "\\", TestSupport.Md5("B2")).UUID = Guid.NewGuid();
+
+        var plan = UpdatePlanner.Build(remote, local, Cfg(@"C:\root"));
+
+        Assert.Equal(PlanAction.Full, plan.Entries[0].Action);   // 内容一模一样，也不许 Skip
+        Assert.Equal(PlanAction.Full, plan.Entries[1].Action);   // 更不许借本地文件当补丁前身
+        Assert.All(plan.Entries, e => Assert.Null(e.PredecessorPath));
     }
 
     [Fact]

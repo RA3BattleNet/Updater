@@ -51,22 +51,18 @@ public static class UpdatePlanner
         var excluded = new HashSet<string>(cfg.ExcludedDirs.Select(Normalize), StringComparer.OrdinalIgnoreCase);
 
         var byUuid = new Dictionary<Guid, ManifestFile>();
-        var byPath = new Dictionary<string, ManifestFile>(StringComparer.OrdinalIgnoreCase);
 
         if (local is not null)
         {
             foreach (var f in local.Manifest.Files)
-            {
                 byUuid[f.UUID] = f;
-                byPath[f.RelativePath()] = f;
-            }
         }
 
         var entries = new List<PlanEntry>(remote.Manifest.Files.Count);
         var unmatched = new List<ManifestFile>();
         var predecessorPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // 第一遍：能按 UUID 定位前身的（覆盖路径变化），退化时按目标路径定位。
+        // 第一遍：**只按 UUID 认身份**（AGENT.md §3.4）。
         foreach (var target in remote.Manifest.Files)
         {
             var targetRel = target.RelativePath();
@@ -78,10 +74,12 @@ public static class UpdatePlanner
                 continue;
             }
 
-            ManifestFile? old = null;
-            if (byUuid.TryGetValue(target.UUID, out var byId)) old = byId;
-            else if (byPath.TryGetValue(targetRel, out var byRel)) old = byRel;
-
+            // 本地没有同 UUID 的条目 → 就是"新文件"，不去按路径猜前身。
+            // 【已决策 2026-09-28】以前这里会退化成"按目标路径找前身"：那等于**客户端替服务端的失误补正**
+            // （同路径换了 UUID 是发布侧该维护好的事），而且猜错的代价是"两个不同文件被接在一起"。
+            // 服务端已保证"同路径 ⇒ 同 UUID"（生成器用 路径派生 UUID + 同路径继承），所以正常流程下
+            // 删掉这条路没有任何行为变化（见 UpdatePlannerTests.DifferentUuid_IsANewFile_...）。
+            var old = byUuid.TryGetValue(target.UUID, out var byId) ? byId : null;
             if (old is null)
             {
                 unmatched.Add(target);
