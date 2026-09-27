@@ -14,16 +14,16 @@
 
 | 项目 | 角色 |
 |---|---|
-| `Ra3.BattleNet.Updater.Share` | 协议模型（清单 / 离线补丁包）、哈希、外部工具封装 |
-| `Ra3.BattleNet.Updater.Core` | **更新引擎**（无 UI、无产品耦合）——**客户端只需引用它** |
-| `Ra3.BattleNet.Updater.Server` | 清单生成 + 生成期自检 + 补丁生成（业务库） |
+| `Ra3.BattleNet.Updater.Share` | 共享层：协议模型（清单格式）、哈希、外部工具封装 |
+| `Ra3.BattleNet.Updater.Core` | **客户端更新引擎**（无 UI、无产品耦合）——**客户端只需引用它** |
+| `Ra3.BattleNet.Updater.Server` | **服务端发布逻辑**：清单生成 + 生成期自检 + 补丁生成 |
 | `Ra3.BattleNet.Updater.XmlGenerator` | 壳：生成 `manifest.xml`（含自检报告） |
 | `Ra3.BattleNet.Updater.Server.PatchGenerator` | 壳：生成 `patches/` 与 `files/` |
 | `Ra3.BattleNet.Updater.Client.Update` | 壳：独立进程跑一次更新（宿主不是 C# 时用） |
-| `Ra3.BattleNet.Updater.Client` / `.Server.CLI` / `.Client.CLI` | 离线补丁包链路（一次性 A→B）——**历史资产**，当前增量流程不走它，见 §8 |
 | `Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试 |
 
-约定：**核心逻辑 = 无后缀的库项目**，**可执行壳 = 带后缀、按角色命名**。
+约定：**核心逻辑 = 无后缀的库项目**（`Share` / `Core` / `Server`），**可执行壳 = 带后缀、按角色命名**。
+`Share` 被两侧共用；客户端库（`Core`）与服务端库（`Server`）**互不依赖**，各自只依赖 `Share`。
 
 ## 2. 客户端
 
@@ -32,7 +32,7 @@
 - `ProjectReference` 或直接引用 DLL：**`Ra3.BattleNet.Updater.Core`**（TFM `net10.0`）。
 - **外部工具必须随产物部署**：`hdiffpatch_bin/{win-x64,linux-x64}/{hdiffz,hpatchz}`。
   默认从**程序自身目录**找（`UpdateConfig.ToolsDir` 可改）；`Share` 项目会自动把它们复制到输出目录。
-- 其它无需依赖：`Newtonsoft.Json` / `Serilog` 只被 §8 的历史链路用到。
+- 除框架外**没有第三方依赖**（客户端链路只用到 `Share` 的工具封装与模型）。
 
 ### 2.2 最小用法
 
@@ -260,19 +260,21 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 | 单文件缓存上限 | CF 的 Free/Pro/Business 为 **512 MB**（Enterprise 5 GB）；超出的对象永远回源 → GB 级文件按"不可缓存"设计 |
 | 外部工具 | `hdiffpatch_bin` 必须随客户端产物部署 |
 
-## 8. 历史资产（参考用，不是当前流程）
+## 8. 已移除的历史链路（只留记录，代码与样例已删）
 
-### 8.1 离线补丁包（一次性 A→B 对比）
+### 8.1 离线补丁包（一次性 A→B 对比）—— **已删除（2026-09-28）**
 
-`Server.CLI`（`--old-manifest/--new-manifest/--old-base/--new-base/--output`）生成一个自包含目录
+原来是 `Server.CLI`（`--old-manifest/--new-manifest/--old-base/--new-base/--output`）生成一个自包含目录
 （`patch-manifest.json` + `files/` + `patches/`），`Client.CLI`（`--patch/--target`）在**离线**环境把它打上。
-它**不参与**当前的服务端发布与在线增量流程（在线流程见 §3/§4）。
+它与在线增量流程**零耦合**，且只被自己的测试使用，所以整条删掉：
 
-> **`BaseVersion` / `TargetVersion` 是这套链路里的历史字段**：写入时两者都填"清单根版本"
-> （我们的生成器恒为 `1.0.0`），而**应用端只读 `Operations`，从不读这两个字段** —— 属于"写而不读"的遗留。
-> 真要保留语义，应当填**清单哈希**（那才是版本身份）。当前不影响任何行为。
+`Server/API.cs`、`Client` 项目、`Server.CLI`、`Client.CLI`、`Share/Models/PatchModel.cs`、
+`Share/Utilities/{PatchApplyer,PatchGenerater,PublicMethod}.cs`、`example/` 样例目录、`Tests/PatchPackageTests.cs`。
 
-### 8.2 已移除的老链路
+> 顺带删掉的两个字段：`PatchManifest.BaseVersion` / `TargetVersion` —— 它们**写而不读**
+> （生成端填的是清单根版本、恒 `1.0.0`；应用端只遍历 `Operations`）。
+
+### 8.2 更早的 SQLite + `patches.json` 索引链路 —— 更早已取代
 
 `Server.PatchIndexGenerator`（SQLite + `patches.json` 索引）与 `Client.PatchIndexApplyer` 已被
 `Server.PatchGenerator` 与 `Client.Update` 取代：现在**没有索引文件**，补丁按内容对直接寻址。

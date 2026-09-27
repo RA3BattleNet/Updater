@@ -15,12 +15,12 @@
 
 | 路径 | 内容 |
 |---|---|
-| `Updater_Csharp/Ra3.BattleNet.Updater.Core` | 更新引擎（客户端只需引用它） |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Server` | 清单生成 + 生成期自检 + 补丁生成 |
+| `Updater_Csharp/Ra3.BattleNet.Updater.Share` | 协议模型（清单格式）、哈希、外部工具封装 |
+| `Updater_Csharp/Ra3.BattleNet.Updater.Core` | **更新引擎**（客户端只需引用它） |
+| `Updater_Csharp/Ra3.BattleNet.Updater.Server` | 清单生成 + 生成期自检 + 补丁生成（发布侧引用的库） |
 | `Updater_Csharp/Ra3.BattleNet.Updater.{XmlGenerator,Server.PatchGenerator}` | 发布流水线的两个壳 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Client.Update` | 独立进程更新入口 |
+| `Updater_Csharp/Ra3.BattleNet.Updater.Client.Update` | 独立进程更新入口（壳） |
 | `Updater_Csharp/Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.{Share,Client,*.CLI}` | 协议模型 / 离线补丁包链路（历史资产） |
 
 ## 文档
 
