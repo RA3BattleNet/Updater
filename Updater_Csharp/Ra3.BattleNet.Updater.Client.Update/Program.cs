@@ -61,6 +61,9 @@ internal static class Program
                 result.FailedCount,
                 result.BytesDownloaded,
                 result.PayloadBytes,
+                result.WireBytes,
+                result.WireSentBytes,
+                result.WireReceivedBytes,
                 Ms = (long)result.Elapsed.TotalMilliseconds,
             }));
         }

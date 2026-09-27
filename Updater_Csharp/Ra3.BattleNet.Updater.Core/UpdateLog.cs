@@ -76,10 +76,13 @@ internal sealed class UpdateLog : IDisposable
     /// <summary>每轮一行（收尾）。result 是增量命中率与节省量的唯一现场证据。</summary>
     public void Run(
         string manifestHash, int total, int skip, int move, int patch, int full, int fail,
-        long bytes, long ms, string result, long requests = 0, long payload = 0)
+        long bytes, long ms, string result, long requests = 0, long payload = 0, long wire = 0)
     {
-        // requests / payload 都是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）
-        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}\t{payload}");
+        // requests / payload / wire 都是**追加**在行尾的新列（AGENT.md §4.11 只允许往行尾追加）：
+        //   payload = 从响应正文里读到的字节（口径见 HttpFetcher.PayloadBytes，**不是**网线字节）；
+        //   wire    = 本进程真正发出 + 收到的字节（连接层计数，含 TLS/HTTP 头/压缩后的正文）——
+        //             做带宽验收（§2.1 F8）看这一列，别用 payload。
+        Write($"R\t{RunId}\t{manifestHash}\t{total}\t{skip}\t{move}\t{patch}\t{full}\t{fail}\t{bytes}\t{ms}\t{result}\t{requests}\t{payload}\t{wire}");
     }
 
     private void Write(string line)

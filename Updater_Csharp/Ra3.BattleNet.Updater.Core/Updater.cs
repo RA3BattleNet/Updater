@@ -491,11 +491,14 @@ public sealed class Updater
         // 304 时它的补数正好抵消上面多加的清单大小。
 
         var payload = _fetcher?.PayloadBytes ?? 0;
+        // wire = 本进程真正上网的字节（连接层计数，M-1）。做带宽验收看它，别用 payload。
+        var wire = _fetcher?.WireBytes ?? 0;
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
-            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, payload);
+            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, payload, wire);
 
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
-            sw.Elapsed, detail, httpVersion, payload);
+            sw.Elapsed, detail, httpVersion, payload, wire,
+            _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0);
     }
 
     private static void SaveEtag(string etagPath, string? etag)

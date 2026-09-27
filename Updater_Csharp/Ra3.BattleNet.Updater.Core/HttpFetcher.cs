@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 
 namespace Ra3.BattleNet.Updater.Core;
 
@@ -31,6 +32,81 @@ internal sealed class HttpFetcher : IDisposable
 
     private int _requests;
     private long _payload;
+    private long _wireIn;
+    private long _wireOut;
+
+    /// <summary>
+    /// 本会话**真正上网的字节**（M-1、AGENT.md §2.1 F8）—— 分收/发两个方向，单位为字节。
+    /// 口径：在**连接层的传输流**上计数（见 <see cref="CountingStream"/>），因此
+    /// <list type="bullet">
+    /// <item>含 TLS 记录、HTTP 头、压缩后的正文、以及所有重试与续传的往返；</item>
+    /// <item>**不含**解压后的内容长度（那是 <see cref="PayloadBytes"/>）——两者别混用；</item>
+    /// <item>走代理时数的是"本进程 ↔ 代理"那一段（实测 `ConnectCallback` 拿到的是**代理端点**）。</item>
+    /// </list>
+    /// </summary>
+    public long WireReceivedBytes => Interlocked.Read(ref _wireIn);
+
+    /// <inheritdoc cref="WireReceivedBytes"/>
+    public long WireSentBytes => Interlocked.Read(ref _wireOut);
+
+    /// <summary>收 + 发（一次更新"上网了多少字节"的唯一可信口径）。</summary>
+    public long WireBytes => WireReceivedBytes + WireSentBytes;
+
+    /// <summary>
+    /// 连接层计数流：包在传输流**外面**（.NET 是在它之上才叠 <c>SslStream</c>），
+    /// 所以数到的是加密后的真实字节，而不是解压后的内容。
+    /// </summary>
+    private sealed class CountingStream(Stream inner, HttpFetcher owner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanWrite => inner.CanWrite;
+        public override bool CanSeek => false;
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = inner.Read(buffer, offset, count);
+            if (n > 0) Interlocked.Add(ref owner._wireIn, n);
+            return n;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var n = await inner.ReadAsync(buffer, ct).ConfigureAwait(false);
+            if (n > 0) Interlocked.Add(ref owner._wireIn, n);
+            return n;
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            inner.Write(buffer, offset, count);
+            Interlocked.Add(ref owner._wireOut, count);
+        }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            await inner.WriteAsync(buffer, ct).ConfigureAwait(false);
+            Interlocked.Add(ref owner._wireOut, buffer.Length);
+        }
+
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync().ConfigureAwait(false);
+            GC.SuppressFinalize(this);
+        }
+    }
 
     /// <summary>
     /// 本会话**响应正文读取字节数** —— 具体口径（别再叫它 "wire"）：
@@ -61,6 +137,26 @@ internal sealed class HttpFetcher : IDisposable
             ConnectTimeout = TimeSpan.FromSeconds(5),
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AutomaticDecompression = DecompressionMethods.All,
+
+            // 连接层计数（M-1）：自己开 TCP 并把传输流包一层计数器。
+            // 实测：配了代理时 ctx.DnsEndPoint 给的就是**代理端点**（系统代理也一样），
+            // 所以这里照 ctx 连就行，不引入"装了计数器就不能走代理"的副作用。
+            ConnectCallback = async (ctx, ct) =>
+            {
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                try
+                {
+                    var addrs = await Dns.GetHostAddressesAsync(ctx.DnsEndPoint.Host, ctx.DnsEndPoint.AddressFamily, ct)
+                        .ConfigureAwait(false);
+                    await socket.ConnectAsync(addrs, ctx.DnsEndPoint.Port, ct).ConfigureAwait(false);
+                    return new CountingStream(new NetworkStream(socket, ownsSocket: true), this);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            },
         };
 
         _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };

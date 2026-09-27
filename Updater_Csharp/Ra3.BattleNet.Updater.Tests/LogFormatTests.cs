@@ -60,9 +60,9 @@ public class LogFormatTests
         Assert.Equal(2, fLines.Count);
         Assert.Single(rLines);
 
-        // 列数写死：F=13 列、R=14 列（requests / payload 都是追加在行尾的列）
+        // 列数写死：F=13 列、R=15 列（requests / payload / wire 都是追加在行尾的列）
         Assert.All(fLines, l => Assert.Equal(13, l.Split('\t').Length));
-        Assert.Equal(14, rLines[0].Split('\t').Length);
+        Assert.Equal(15, rLines[0].Split('\t').Length);
 
         // action / status 是封闭集合
         var actions = new[] { "skip", "move", "patch", "full" };
@@ -97,6 +97,9 @@ public class LogFormatTests
         Assert.Equal("Updated", r[11]);
         Assert.True(int.Parse(r[12]) > 0, "requests 列必须被填写（F8）");
         Assert.True(long.Parse(r[13]) > 0, "payload 列必须被填写（响应正文读取字节）");
+        Assert.True(long.Parse(r[14]) > 0, "wire 列必须被填写（真正上网的字节，F8 的验收口径）");
+        Assert.True(long.Parse(r[14]) > long.Parse(r[13]),
+            "wire 含 HTTP 头，必须大于 payload —— 两者不是一回事（别把 wire 接回 payload）");
 
         // 口径：payload 是"从响应正文里读到的字节"，比内容字节多出清单那一份（这里没有传输压缩）。
         // 它**不是**网线字节（§4.11、OPEN_ISSUES M-1）：真要算带宽得看边缘出口统计。
