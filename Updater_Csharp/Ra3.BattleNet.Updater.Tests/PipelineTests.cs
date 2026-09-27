@@ -98,6 +98,8 @@ public class PipelineTests
             $"期望至少 2 个请求同时在飞，实测峰值 {parallelPeak}（说明退化成了线性执行）");
 
         // 服务端每个响应都慢 150ms，并发度必须体现在墙钟时间上
+        Console.WriteLine($"并发验证：上限1 → {serialMs}ms（在飞峰值 {serialPeak}）；" +
+                          $"上限4 → {parallelMs}ms（在飞峰值 {parallelPeak}）");
         Assert.True(parallelMs < serialMs * 0.8,
             $"并发未产生加速：串行 {serialMs}ms vs 并发 {parallelMs}ms（峰值 {parallelPeak}）");
     }
