@@ -57,6 +57,16 @@ public class VersionMatrixSimulation
         return dir;
     }
 
+    /// <summary>跑一次并把"上网字节"一起带回来。</summary>
+    private static (UpdateResult Result, long Wire) RunMeasured(string client, TestHttpServer http,
+        Func<UpdateConfig, UpdateConfig>? tweak = null, CancellationToken ct = default,
+        IProgress<UpdateProgress>? progress = null)
+    {
+        http.ResetWire();
+        var r = Run(client, http, tweak, ct, progress);
+        return (r, http.WireBytesSent);
+    }
+
     private static UpdateResult Run(string client, TestHttpServer http,
         Func<UpdateConfig, UpdateConfig>? tweak = null, CancellationToken ct = default,
         IProgress<UpdateProgress>? progress = null)
@@ -144,7 +154,7 @@ public class VersionMatrixSimulation
     private sealed record Artifacts(int Requests, string Summary);
 
     private static Artifacts Capture(string scenario, string expectation, string client, UpdateResult r,
-        string comparison, long baselineBytes = 0, string extra = "")
+        string comparison, long baselineBytes = 0, string extra = "", long wireBytes = 0)
     {
         var dir = Path.Combine(LogsDir, scenario);
         Directory.CreateDirectory(dir);
@@ -173,7 +183,8 @@ public class VersionMatrixSimulation
         md.AppendLine($"- **实际**：`{r}`");
         md.AppendLine($"- **目录比对**：{comparison}");
         md.AppendLine($"- **HTTP 请求数**（R 行末列）：{requests}");
-        md.AppendLine($"- **下载字节**：{r.BytesDownloaded:N0}" +
+        md.AppendLine($"- **上网字节（真的走网线的，压缩后）**：{(wireBytes > 0 ? wireBytes.ToString("N0") : "未记录")}");
+        md.AppendLine($"- **下载字节（内容字节，解压后）**：{r.BytesDownloaded:N0}" +
                       (baselineBytes > 0
                           ? $"；只下变更文件的基线 {baselineBytes:N0} → 节省 {saved:P1}"
                           : string.Empty));
@@ -216,7 +227,7 @@ public class VersionMatrixSimulation
             }, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
 
         var summary = $"{scenario,-34} {r.Outcome,-16} patch={r.Patched,4} full={r.Full,4} " +
-                      $"fail={r.FailedCount} bytes={r.BytesDownloaded,12:N0} req={requests,5} " +
+                      $"fail={r.FailedCount} 内容={r.BytesDownloaded,12:N0} 网线={wireBytes,12:N0} req={requests,5} " +
                       $"命中率={hitRate,6:P1} 节省={(baselineBytes > 0 ? saved : 0),6:P1} {comparison}";
         Console.WriteLine(summary);
         return new Artifacts(requests, summary);
@@ -695,6 +706,139 @@ public class VersionMatrixSimulation
         CleanupClient(client);
     }
 
+    [Fact]
+    public void S17_运维一次性批量关联UUID之后_同一版本()
+    {
+        if (NotReady()) return;
+        const string name = "S17_v5_fully_linked";
+
+        var linked = Path.Combine(ManifestsDir, "v5-linked-full.xml");
+        var pairFile = Path.Combine(ManifestsDir, "v5-linked-full-pairs.json");
+        if (!File.Exists(linked) || !File.Exists(pairFile))
+        {
+            Console.WriteLine("跳过：没有 v5-linked-full.xml（先跑 _sim/link-uuids-full.ps1）");
+            return;
+        }
+
+        long linkedBytes = 0;
+        var pairs = JsonSerializer.Deserialize<List<JsonElement>>(File.ReadAllText(pairFile))!;
+        var byName = pairs.Count(p => p.GetProperty("Why").GetString() == "同名");
+        foreach (var e in pairs)
+        {
+            var rel = e.GetProperty("New").GetString()!;
+            var p = Path.Combine(VersionDir(5), rel.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(p)) linkedBytes += new FileInfo(p).Length;
+        }
+
+        PublishFile(linked);
+        var client = NewClient(name, 4);
+        using var http = new TestHttpServer(ServerDir);
+
+        var r = Run(client, http);
+        var diff = Compare(5, client);
+        var extra = $"- **对照组**（未关联，S02）：patch=30 full=613，下载 286,010,410 字节\n" +
+                    $"- 本次关联 {pairs.Count} 对搬家文件（其中**同名匹配 {byName} 对**），涉及 {linkedBytes:N0} 字节\n" +
+                    $"- 关联方式：按文件名（大小写不敏感）优先配对，其余按尺寸窗口（≤2 倍）配对，贪心 1:1";
+        Capture(name, "运维一次性批量关联 UUID（同名优先）之后：同一对版本应当大量吃上补丁",
+            client, r, diff.Text, BaselineBytes(4, 5), extra);
+
+        Assert.Equal(UpdateOutcome.Updated, r.Outcome);
+        Assert.Equal(0, r.FailedCount);
+        Assert.True(r.Patched >= 400, $"关联后应当有几百个补丁命中，实得 {r.Patched}");
+        Assert.True(diff.Clean, diff.Text);
+        CleanupClient(client);
+    }
+
+    [Fact]
+    public void S18_逐级升级_v1到v5分四步()
+    {
+        if (NotReady()) return;
+
+        var client = NewClient("S18_chained_v1_to_v5", 1);
+        using var http = new TestHttpServer(ServerDir);
+
+        long totalBytes = 0;
+        var steps = new List<string>();
+        for (var v = 2; v <= 5; v++)
+        {
+            Publish(v);
+            var r = Run(client, http);
+            Capture($"S18_step_v{v - 1}_to_v{v}", $"逐级升级的第 {v - 1} 步：v{v - 1} → v{v}",
+                client, r, Compare(v, client).Text, BaselineBytes(v - 1, v));
+            Assert.Equal(UpdateOutcome.Updated, r.Outcome);
+
+            totalBytes += r.BytesDownloaded;
+            steps.Add($"v{v - 1}→v{v}: patch={r.Patched} full={r.Full} bytes={r.BytesDownloaded:N0}");
+        }
+
+        var diff = Compare(5, client);
+        var summary = new UpdateResult(UpdateOutcome.Updated, string.Empty, 0, 0, 0, 0, 0, 0,
+            totalBytes, TimeSpan.Zero);
+        var extra = "- 四步明细：\n" + string.Join("\n", steps.Select(s => $"  - {s}")) +
+                    $"\n- **逐级合计**：{totalBytes:N0} 字节\n" +
+                    "- **对照**：直接 v1→v5 = 312,863,990（S06）；只下变更文件不做差分 = 339,906,059；v5 整包 = 166,806,449";
+        Capture("S18_chained_v1_to_v5", "逐级 v1→v2→v3→v4→v5 是否比直接跳到 v5 更省",
+            client, summary, diff.Text, BaselineBytes(1, 5), extra);
+
+        Assert.True(diff.Clean, diff.Text);
+        CleanupClient(client);
+    }
+
+    /// <summary>
+    /// 四个组合的对照：v4→v5 这一对版本，
+    ///   S02 = 不压缩 + 不关联（基线）
+    ///   S19 = **服务端 gzip 压缩** + 不关联
+    ///   S17 = 不压缩 + 全量关联 UUID
+    ///   S20 = 压缩 + 全量关联
+    /// 看的是**上网字节**（真的走网线的），而不是客户端统计的"内容字节"。
+    /// </summary>
+    [Fact]
+    public void S19_压缩传输_不关联UUID()
+    {
+        if (NotReady()) return;
+        const string name = "S19_gzip_no_relink";
+        Publish(5);
+        var client = NewClient(name, 4);
+        using var http = new TestHttpServer(ServerDir) { CompressPayloads = true };
+
+        var (r, wire) = RunMeasured(client, http);
+        var diff = Compare(5, client);
+        var extra = $"- 服务端对 `files/*`、`patches/*` 做 gzip 并带 `Content-Encoding: gzip`（清单不压）\n" +
+                    $"- 压缩响应数：{http.CompressedResponses}\n" +
+                    $"- 客户端统计的「内容字节」={r.BytesDownloaded:N0}，**上网字节**={wire:N0}";
+        Capture(name, "服务端压缩传输、不做 UUID 关联：与 S02 同源，比较上网字节",
+            client, r, diff.Text, BaselineBytes(4, 5), extra, wire);
+
+        Assert.Equal(UpdateOutcome.Updated, r.Outcome);
+        Assert.True(http.CompressedResponses > 100);
+        Assert.True(diff.Clean, diff.Text);
+        CleanupClient(client);
+    }
+
+    [Fact]
+    public void S20_压缩传输_加全量关联UUID()
+    {
+        if (NotReady()) return;
+        const string name = "S20_gzip_with_relink";
+        var linked = Path.Combine(ManifestsDir, "v5-linked-full.xml");
+        if (!File.Exists(linked)) { Console.WriteLine("跳过：没有 v5-linked-full.xml"); return; }
+
+        PublishFile(linked);
+        var client = NewClient(name, 4);
+        using var http = new TestHttpServer(ServerDir) { CompressPayloads = true };
+
+        var (r, wire) = RunMeasured(client, http);
+        var diff = Compare(5, client);
+        var extra = $"- 压缩传输 + 全量关联 UUID（{r.Patched} 个补丁命中）\n" +
+                    $"- **注意**：补丁本身已被 hdiffz 压过，gzip 几乎压不动；能被压的是 `files/*` 那部分\n" +
+                    $"- 客户端统计的「内容字节」={r.BytesDownloaded:N0}，**上网字节**={wire:N0}";
+        Capture(name, "压缩传输 + 全量关联 UUID：看两者叠加是加分还是互相抵消",
+            client, r, diff.Text, BaselineBytes(4, 5), extra, wire);
+
+        Assert.Equal(UpdateOutcome.Updated, r.Outcome);
+        Assert.True(diff.Clean, diff.Text);
+        CleanupClient(client);
+    }
     // ---------------------------------------------------------------- 工具
 
     private static string RepoRoot()
