@@ -62,6 +62,14 @@ public static class UpdateReasons
     /// <summary>服务端没有该内容对的补丁（404）。</summary>
     public const string NoPatch = "no_patch";
 
+    /// <summary>
+    /// 本机的**补丁应用工具（hpatchz）不可用**，所以本轮在**计划阶段**就把补丁降级成了完整下载
+    /// （区别于 <see cref="PatchFailed"/>：那是"补丁已经下下来了、打不上"）。
+    /// 典型场景：32 位宿主（RID = win-x86）而随包工具只覆盖 x64；或工具目录配错。
+    /// 有它才能把"服务端没做补丁"与"本机没工具"在日志里分开。
+    /// </summary>
+    public const string PatchToolMissing = "patch_tool_missing";
+
     /// <summary>补丁下载 / 应用 / 校验失败。</summary>
     public const string PatchFailed = "patch_failed";
 

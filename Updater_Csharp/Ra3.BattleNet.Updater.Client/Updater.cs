@@ -19,6 +19,16 @@ public sealed class Updater
     private HttpFetcher? _fetcher;
 
     /// <summary>
+    /// 本会话开始时探测一次：**补丁应用工具（hpatchz）能不能用**（每轮重探，工具可能被宿主补上）。
+    /// 为 false 时计划阶段就把补丁降级成完整下载 —— 否则会"下一份补丁 → 打不上 → 删掉 → 再下完整文件"，
+    /// 比纯完整下载还费流量（32 位宿主没有随包 win-x86 工具时就是这种病态状态）。
+    /// </summary>
+    private bool _patchToolAvailable = true;
+
+    /// <summary>缺工具导致本轮降级时，写给 <c>UpdateResult.Detail</c> 的一句话（见 Finish）。</summary>
+    private string? _patchToolNote;
+
+    /// <summary>
     /// 同一进程里的第几轮更新。一次进程可能跑多轮（用户取消后重跑、宿主反复调用），
     /// 它们共用一个 update.log；run_id 若只到秒 + PID，同秒内的两轮会撞成同一个 id，
     /// 分析脚本就再也分不开这两轮的 F/R 行（I-4）。
@@ -72,6 +82,11 @@ public sealed class Updater
 
         var sw = Stopwatch.StartNew();
         var tally = new Tally();
+
+        // 补丁工具在不在，**开工前问一次**（§7.1）：缺了就让计划把补丁降级成完整下载，
+        // 而不是等下载完补丁、应用失败、删掉补丁之后再回落。
+        _patchToolAvailable = HdiffTool.FindPatchTool(_cfg.ResolveToolsDir()) is not null;
+        _patchToolNote = null;
 
         var localManifestPath = Path.GetFullPath(_cfg.ResolveLocalManifestPath());
         var cacheDir = Path.GetFullPath(_cfg.ResolveCacheDir());
@@ -142,9 +157,15 @@ public sealed class Updater
             }
         }
 
-        var plan = UpdatePlanner.Build(remote, local, _cfg);
+        var plan = UpdatePlanner.Build(remote, local, _cfg, _patchToolAvailable);
         tally.Total = plan.Total;
         tally.Skip = plan.Unchanged;
+
+        // 补丁工具不可用时，在 Detail 里留一句（否则用户只会看到"这次怎么全在整包下载"）——
+        // 归因的权威位置仍是 F 行的 reason=patch_tool_missing。
+        if (!_patchToolAvailable && plan.Entries.Any(e => e.Action == PlanAction.Full && e.Predecessor is not null))
+            _patchToolNote = $"补丁工具（hpatchz）在本机不可用（RID={HdiffTool.Rid}，随包平台：{string.Join("/", HdiffTool.ShippedRids)}）：" +
+                             "本轮全部按完整下载处理（reason=patch_tool_missing），不会浪费补丁流量。";
 
         // 资源保护判据（默认关闭）：**不依赖版本号语义**，只用两份 manifest 得出的文件数。
         // 注意这不是「文件多就走全量」——变更文件多恰恰是增量最该发挥作用的场景。
@@ -348,10 +369,15 @@ public sealed class Updater
             }
 
             default:
-                // §4.11：full 行必须能归因。计划把它判成 full 只有一种原因 ——
-                // 本地没有任何可用的前身（UUID/路径都对不上、内容索引里也没有），所以是 no_local。
-                // 以前这里传 None，导致 613 个 full 行的 reason 全空、归因字段形同虚设。
-                return await FullAsync(entry, fetcher, cacheDir, UpdateReasons.NoLocal, ct).ConfigureAwait(false);
+                // §4.11：full 行必须能归因。两种来路：
+                //   ① 本地没有可用的前身（UUID 对不上、内容索引里也没有）→ no_local；
+                //   ② 本轮**缺补丁工具**，计划阶段把本该打补丁的条目降级成了 full → patch_tool_missing。
+                // 【2026-09-28】以前只有 ①，于是 32 位宿主（没有 win-x86 hpatchz）每轮都表现为
+                // "先下一份补丁白费、再下全量"，而且日志里只留 patch_failed，看不出是缺工具。
+                var fullReason = !_patchToolAvailable && entry.Predecessor is not null
+                    ? UpdateReasons.PatchToolMissing
+                    : UpdateReasons.NoLocal;
+                return await FullAsync(entry, fetcher, cacheDir, fullReason, ct).ConfigureAwait(false);
         }
     }
 
@@ -496,8 +522,12 @@ public sealed class Updater
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, payload, wire);
 
+        // 成功路径本来 Detail 为空；缺补丁工具导致降级时在这里补一句，
+        // 让宿主/壳（`--json`）能立刻看出"这轮为什么全在整包下载"。
+        var detailOut = detail.Length > 0 ? detail : (_patchToolNote ?? string.Empty);
+
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
-            sw.Elapsed, detail, httpVersion, payload, wire,
+            sw.Elapsed, detailOut, httpVersion, payload, wire,
             _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0);
     }
 

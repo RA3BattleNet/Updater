@@ -14,11 +14,18 @@ public static class HdiffTool
     public static readonly string Rid = RuntimeInformation.RuntimeIdentifier;
 
     /// <summary>
-    /// 本仓库**随包提供**外部工具的平台。只留 x86-64 的 Windows 与 Linux：
-    /// Windows 是客户端与发布机的主场，Linux 覆盖"发布流水线跑在 Linux CI"的情况。
-    /// 其他平台（arm/arm64/riscv/loongarch/macos/32 位）请自行放入 hdiffpatch_bin/&lt;rid&gt;/。
+    /// 本仓库**随包提供**外部工具的平台。
+    /// <list type="bullet">
+    /// <item><c>win-x64</c> / <c>linux-x64</c>：v5.1.3（客户端与发布机的主场）。</item>
+    /// <item><c>win-x86</c>：**v4.8.0** —— 官方 v5.1.3 发布包**没有** windows32 资产（只有 linux32），
+    /// 而 x86 宿主（例如 32 位的 Desktop 宿主）的 `Rid` 就是 <c>win-x86</c>，不随包就会走到
+    /// "找不到工具 → 白白下一份补丁再回落完整下载"。实测（2026-09-28）v4.8.0 的 win-x86 工具与
+    /// v5.1.3 x64 生成的 <c>-c-lzma</c> 补丁**双向兼容**：x86 hpatchz 能正确应用 x64 hdiffz 的 lzma 补丁，
+    /// x64 hpatchz 也能应用 x86 hdiffz 产出的补丁（含真实夹具的二进制内容对，退出码 0、哈希一致）。</item>
+    /// </list>
+    /// 其他平台（arm/arm64/riscv/loongarch/macos/其它 32 位）请自行放入 hdiffpatch_bin/&lt;rid&gt;/。
     /// </summary>
-    public static readonly string[] ShippedRids = ["win-x64", "linux-x64"];
+    public static readonly string[] ShippedRids = ["win-x64", "win-x86", "linux-x64"];
 
     /// <summary>
     /// 外部工具的兜底超时：**按体积缩放**（5 GB 的 ISO 做一次 <c>-s -c-lzma</c> 差分要几十分钟，
@@ -30,18 +37,31 @@ public static class HdiffTool
         return TimeSpan.FromMinutes(Math.Clamp(minutes, 5, 120));
     }
 
+    /// <summary>
+    /// **计划阶段**的探测入口：补丁应用工具（hpatchz）在当前环境下能不能用。
+    /// 返回可执行文件路径，找不到返回 <c>null</c>。
+    ///
+    /// 为什么要有这个：补丁应用发生在**下载之后**，若等到那时才发现没有工具，
+    /// 就已经把补丁白下了一遍（下载 → 应用失败 → 删掉补丁 → 再下完整文件，比纯完整下载还费流量）。
+    /// 所以调用方应当在生成计划前先问一次，缺工具就把 <c>patch</c> 直接降级成 <c>full</c>（§7.1）。
+    /// </summary>
+    public static string? FindPatchTool(string toolsDir) => Find(toolsDir, "hpatchz");
+
     /// <summary>按 工具目录 → 工具目录/RID → 程序目录 → 程序目录/hdiffpatch_bin/RID → PATH 的顺序查找。</summary>
-    public static string? Find(string toolsDir, string toolName)
+    public static string? Find(string toolsDir, string toolName) => Find(toolsDir, toolName, Rid);
+
+    /// <summary>同上，但显式指定 RID（供测试与"按别的平台布局部署"的场景用）。</summary>
+    internal static string? Find(string toolsDir, string toolName, string rid)
     {
         var exe = OperatingSystem.IsWindows() ? toolName + ".exe" : toolName;
         var candidates = new[]
         {
             Path.Combine(toolsDir, exe),
-            Path.Combine(toolsDir, Rid, exe),
+            Path.Combine(toolsDir, rid, exe),
             Path.Combine(AppContext.BaseDirectory, exe),
             Path.Combine(AppContext.BaseDirectory, "tools", exe),
-            Path.Combine(AppContext.BaseDirectory, "tools", Rid, exe),
-            Path.Combine(AppContext.BaseDirectory, "hdiffpatch_bin", Rid, exe),
+            Path.Combine(AppContext.BaseDirectory, "tools", rid, exe),
+            Path.Combine(AppContext.BaseDirectory, "hdiffpatch_bin", rid, exe),
         };
 
         foreach (var c in candidates)
@@ -135,8 +155,10 @@ public static class HdiffTool
             return (false,
                 $"找不到外部工具 {toolName}：当前 RID = {Rid}，本包随发的平台只有 " +
                 $"{string.Join(" / ", ShippedRids)}。工具目录 = {toolsDir}。" +
-                "请从 HDiffPatch 官方包把对应平台的二进制放进 hdiffpatch_bin/<rid>/，" +
-                "或接受「完整下载」的回落（客户端不会因此失败）。");
+                "请从 HDiffPatch 官方包把对应平台的二进制放进 hdiffpatch_bin/<rid>/；" +
+                (toolName == "hpatchz"
+                    ? "注意：缺 hpatchz 时**计划阶段**就会把补丁降级为完整下载（reason=patch_tool_missing），不会再浪费补丁流量。"
+                    : "缺 hdiffz 时补丁生成会逐个失败并如实报错。"));
 
         var psi = new ProcessStartInfo(exePath)
         {

@@ -45,7 +45,15 @@ public sealed class UpdatePlan
 /// </summary>
 public static class UpdatePlanner
 {
-    public static UpdatePlan Build(ManifestModel remote, ManifestModel? local, UpdateConfig cfg)
+    /// <summary>
+    /// 生成计划。
+    /// <paramref name="patchAvailable"/> = 本机的补丁应用工具（hpatchz）**能不能用**。
+    /// 为 <c>false</c> 时所有本会走补丁的条目**在计划阶段就降级为完整下载** —— 这样不会出现
+    /// "补丁下下来才发现打不上、删掉再下完整文件"（那比纯完整下载还费流量）。缺工具的归因由
+    /// 调用方写成 <c>patch_tool_missing</c>（见 <c>Updater.ProcessEntryAsync</c>）。
+    /// </summary>
+    public static UpdatePlan Build(ManifestModel remote, ManifestModel? local, UpdateConfig cfg,
+        bool patchAvailable = true)
     {
         var root = Path.GetFullPath(cfg.RootPath);
         var excluded = new HashSet<string>(cfg.ExcludedDirs.Select(Normalize), StringComparer.OrdinalIgnoreCase);
@@ -99,7 +107,9 @@ public static class UpdatePlanner
             }
             else
             {
-                entries.Add(new PlanEntry(PlanAction.Patch, target, targetPath, old, oldPath, old.MD5));
+                // 没有补丁工具 → 计划阶段就降级成 full（保留前身信息，便于调用方写出归因 reason）
+                entries.Add(new PlanEntry(patchAvailable ? PlanAction.Patch : PlanAction.Full,
+                    target, targetPath, old, oldPath, old.MD5));
             }
         }
 

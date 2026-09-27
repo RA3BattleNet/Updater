@@ -258,7 +258,8 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 | `manifest.xml` | **不要缓存**（唯一会变的对象）；条件请求可用，命中 304 = 0 字节 |
 | 压缩 | CF 只按 `Content-Type` 白名单压：`manifest.xml`（`text/xml`）19,507 → **3,264 B**；`files/`、`patches/`（`application/octet-stream`）**不压**——已按"不压"设计，不再为它做特殊处理 |
 | 单文件缓存上限 | CF 的 Free/Pro/Business 为 **512 MB**（Enterprise 5 GB）；超出的对象永远回源 → GB 级文件按"不可缓存"设计 |
-| 外部工具 | `hdiffpatch_bin` 必须随客户端产物部署 |
+| 外部工具 | `hdiffpatch_bin` **必须带与宿主 RID 匹配的那一份**：`HdiffTool.Rid` = 当前**进程**架构（32 位宿主 → `win-x86`）。随包覆盖 win-x64 / win-x86 / linux-x64 |
+| 缺工具时 | **计划阶段就降级**：`hpatchz` 找不到 → 所有补丁直接计划成完整下载，`reason=patch_tool_missing`，`UpdateResult.Detail` 说明原因。绝不会"先下一份补丁再回落"（那比纯完整下载还费流量） |
 
 ## 8. 已移除的历史链路（只留记录，代码与样例已删）
 

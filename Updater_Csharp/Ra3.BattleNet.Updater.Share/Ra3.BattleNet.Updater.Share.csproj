@@ -11,10 +11,21 @@
     <PackageReference Include="Serilog" Version="4.3.0" />
   </ItemGroup>
 
-  <!-- 外部差分工具必须随产物部署（AGENT.md §7.1 / K15） -->
   <ItemGroup>
-    <Content Include="hdiffpatch_bin\win-x86\**" CopyToOutputDirectory="PreserveNewest" />
+    <InternalsVisibleTo Include="Ra3.BattleNet.Updater.Tests" />
+  </ItemGroup>
+
+  <!--
+    外部差分工具必须随产物部署（AGENT.md §7.1 / K15）。
+    ⚠ **每个随包 RID 都必须在这里列一行**：漏掉某个平台（例如曾经漏掉 linux-x64、而 win-x86 又没有二进制）
+    时，运行期 `HdiffTool.Find` 就找不到工具 —— 客户端会在**下载完补丁之后**才发现，
+    白下一段补丁再回落完整下载。计划阶段的降级（`reason=patch_tool_missing`）是兜底，
+    但真正该对齐的是这里与 `HdiffTool.ShippedRids` 两份清单。
+  -->
+  <ItemGroup>
     <Content Include="hdiffpatch_bin\win-x64\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="hdiffpatch_bin\win-x86\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="hdiffpatch_bin\linux-x64\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
