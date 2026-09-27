@@ -21,8 +21,11 @@ public sealed record PatchGenerationSummary(
 /// </summary>
 public static class PatchGenerator
 {
-    /// <summary>小于该大小的文件不生成补丁（AGENT.md §5.3 / K6）。</summary>
-    public const long DefaultMinFileSize = 16 * 1024;
+    /// <summary>
+    /// 生成补丁前的尺寸预过滤（省 CPU）。**默认 0 = 不过滤**：
+    /// 权威规则是「补丁不小于完整文件就弃用」的后判断，见 Generate。
+    /// </summary>
+    public const long DefaultMinFileSize = 0;
 
     public static PatchGenerationSummary Generate(
         string newManifestPath,

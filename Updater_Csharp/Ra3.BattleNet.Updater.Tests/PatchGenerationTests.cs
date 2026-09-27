@@ -20,14 +20,14 @@ public class PatchGenerationTests
     }
 
     [Fact]
-    public void SmallFiles_GetNoPatch_ByDefault()
+    public void MinSizePreFilter_SkipsSmallFiles()
     {
         using var tmp = new TempDir();
-        // 1 KB：低于 16 KB 阈值，服务端根本不会尝试生成补丁
+        // 显式设置预过滤：1 KB 文件根本不尝试生成补丁（默认不过滤，靠尺寸后判断）
         var (v1, v2, m1, m2) = Prepare(tmp, size: 1024);
         var server = tmp.Sub("server");
 
-        var summary = PatchGenerator.Generate(m2, v2, [new Baseline(m1, v1)], server);
+        var summary = PatchGenerator.Generate(m2, v2, [new Baseline(m1, v1)], server, minFileSize: 16 * 1024);
 
         Assert.Equal(0, summary.PatchesCreated);
         Assert.Empty(Directory.GetFiles(Path.Combine(server, "patches")));

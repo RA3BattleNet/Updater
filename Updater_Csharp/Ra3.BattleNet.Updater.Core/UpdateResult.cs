@@ -9,9 +9,12 @@ public enum UpdateOutcome
     /// <summary>更新成功，本地 manifest 已更新。</summary>
     Updated,
 
-    /// <summary>**正常分支**：本次不适合走增量（首次安装 / 跨版本过多 / 本地状态不可信），
-    /// 请宿主改走完整包通道（BT / 直链）。</summary>
-    NeedsFullPackage,
+    /// <summary>
+    /// **正常分支**：本库交回宿主处理本次更新（本地状态不可信 / 达到资源保护阈值等）。
+    /// 宿主自行决定怎么办 —— 通常是去拿整体安装包（BT / 直链），但那**不是本库的职责**，
+    /// 本库协议里的「完整」只指 <c>files/{md5}</c> 这种单个完整文件。
+    /// </summary>
+    NeedsHostFallback,
 
     /// <summary>**意外**：网络 / 磁盘 / 权限等导致的失败。</summary>
     Failed,

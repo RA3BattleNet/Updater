@@ -93,6 +93,37 @@ public class EndToEndTests
     }
 
     [Fact]
+    public void NoLocalManifest_VerifiesDiskInsteadOfRedownloadingEverything()
+    {
+        using var tmp = new TempDir();
+
+        var v1 = tmp.Sub("v1");
+        TestSupport.WriteTree(v1, ("a.bin", TestSupport.Big("ONE")), ("b.txt", "hello"), ("c/d.txt", "nested"));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var server = tmp.Sub("server");
+        PatchGenerator.Generate(m1, v1, [], server);
+        File.Copy(m1, Path.Combine(server, "manifest.xml"), overwrite: true);
+
+        // 客户端目录内容与远端完全一致，但**没有本地清单**
+        var client = tmp.Sub("client");
+        TestSupport.CopyTree(v1, client);
+
+        using var http = new TestHttpServer(server);
+        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var result = new CoreUpdater(cfg).Run();
+
+        // 必须退化为「按磁盘哈希校验」：花 CPU，不花带宽
+        Assert.Equal(UpdateOutcome.Updated, result.Outcome);
+        Assert.Equal(3, result.Skipped);
+        Assert.Equal(0, result.Full);
+        Assert.Equal(0, result.BytesDownloaded);
+        Assert.Equal(0, http.NotFound);   // 没有前身，连补丁都不该去探测
+    }
+
+    [Fact]
     public void WorkloadPredicate_TriggersNeedsFullPackage()
     {
         using var tmp = new TempDir();
@@ -125,7 +156,7 @@ public class EndToEndTests
         };
 
         var result = new CoreUpdater(cfg).Run();
-        Assert.True(result.Outcome == UpdateOutcome.NeedsFullPackage, $"期望 NeedsFullPackage，实得 {result}；Detail={result.Detail}");
+        Assert.True(result.Outcome == UpdateOutcome.NeedsHostFallback, $"期望 NeedsHostFallback，实得 {result}；Detail={result.Detail}");
         Assert.Equal(UpdateReasons.WorkloadTooLarge, result.Reason);
 
         // 不得改动任何文件

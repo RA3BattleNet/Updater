@@ -29,11 +29,14 @@ public sealed record UpdateConfig
     /// <summary>并发下载上限（AGENT.md §4.6：2 起、上限 4）。</summary>
     public int MaxConcurrency { get; init; } = 4;
 
-    /// <summary>待下载文件数超过该值即判定「需要完整包」。</summary>
-    public int FullPackageThresholdFiles { get; init; } = 500;
+    /// <summary>
+    /// 可选保险丝：待下载文件数超过该值即交回宿主。**默认 0 = 关闭**。
+    /// 这不是「文件多就走全量」——变更文件越多，增量越有价值。
+    /// </summary>
+    public int FullPackageThresholdFiles { get; init; }
 
-    /// <summary>待下载文件数占比超过该值即判定「需要完整包」（配合下面的最小文件数）。</summary>
-    public double FullPackageThresholdRatio { get; init; } = 0.30;
+    /// <summary>同上，按占比。**默认 0 = 关闭**。</summary>
+    public double FullPackageThresholdRatio { get; init; }
 
     /// <summary>占比判据生效的最小文件数；避免小规模产品误判。</summary>
     public int FullPackageRatioMinFiles { get; init; } = 50;

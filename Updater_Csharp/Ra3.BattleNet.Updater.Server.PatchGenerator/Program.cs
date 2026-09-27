@@ -92,7 +92,7 @@ internal static class Program
         Console.WriteLine("  --manifest / --manifest-root   新版本的清单与其文件根目录");
         Console.WriteLine("  --baseline / --baseline-root   基线版本清单与其根目录；可重复多组");
         Console.WriteLine("  --output                       输出目录（files/ 与 patches/ 会在此建立）");
-        Console.WriteLine("  --min-size <字节>              小于该大小的文件不生成补丁（默认 16384）");
+        Console.WriteLine("  --min-size <字节>              生成补丁前的尺寸预过滤（默认 0 = 不过滤；权威规则是尺寸后判断）");
         Console.WriteLine("  --tools <目录>                 外部工具目录（默认程序目录）");
         Console.WriteLine("  --prune                        删除不属于当前基线集合的补丁文件");
         Console.WriteLine("  --no-verify                    跳过「补丁可用性」校验（默认会校验）");

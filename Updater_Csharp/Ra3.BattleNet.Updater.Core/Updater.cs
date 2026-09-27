@@ -15,6 +15,9 @@ public sealed class Updater
     private readonly UpdateConfig _cfg;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _blobLocks = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>连完整下载都失败的文件达到该数量时，判定本地状态不可信、交回宿主（AGENT.md §4.5）。</summary>
+    private const int FailToleranceForHostFallback = 5;
+
     public Updater(UpdateConfig cfg) => _cfg = cfg;
 
     public UpdateResult Run(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
@@ -117,38 +120,60 @@ public sealed class Updater
         tally.Total = plan.Total;
         tally.Skip = plan.Unchanged;
 
-        // 工作量判据（§4.4）：**不依赖版本号语义**，只用两份 manifest 得出的文件数
-        if (plan.ToDownload > _cfg.FullPackageThresholdFiles
-            || (plan.ToDownload >= _cfg.FullPackageRatioMinFiles
-                && plan.ToDownload > plan.Total * _cfg.FullPackageThresholdRatio))
+        // 资源保护判据（默认关闭）：**不依赖版本号语义**，只用两份 manifest 得出的文件数。
+        // 注意这不是「文件多就走全量」——变更文件多恰恰是增量最该发挥作用的场景。
+        // 它只是运维可选的保险丝，默认阈值为 0 = 不启用。
+        var overFiles = _cfg.FullPackageThresholdFiles > 0
+            && plan.ToDownload > _cfg.FullPackageThresholdFiles;
+        var overRatio = _cfg.FullPackageThresholdRatio > 0
+            && plan.ToDownload >= _cfg.FullPackageRatioMinFiles
+            && plan.ToDownload > plan.Total * _cfg.FullPackageThresholdRatio;
+
+        if (overFiles || overRatio)
         {
-            return Finish(log, tally, sw, UpdateOutcome.NeedsFullPackage, UpdateReasons.WorkloadTooLarge,
-                $"需要下载 {plan.ToDownload}/{plan.Total} 个文件");
+            return Finish(log, tally, sw, UpdateOutcome.NeedsHostFallback, UpdateReasons.WorkloadTooLarge,
+                $"待下载 {plan.ToDownload}/{plan.Total} 个文件，超过配置的保护阈值");
         }
 
         if (localCorrupt)
             log.File(string.Empty, null, localManifestPath, remoteHash, null, "full", LogStatus.NeedsFullPackage,
                 UpdateReasons.LocalCorrupt, 0, 0);
 
-        // Skip 分支只做便宜的校验；不合格就地升级为完整下载
+        // 本地清单缺失/损坏时，计划里每个文件都会是「完整下载」—— 那等于把整个产品重下。
+        // 正确做法是**退化成按磁盘哈希校验**：命中就跳过。花 CPU，不花带宽（AGENT.md §4.10）。
+        var verifyAgainstDisk = local is null;
+
         var work = plan.Entries.ToList();
         for (var i = 0; i < work.Count; i++)
         {
             var e = work[i];
-            if (e.Action != PlanAction.Skip) continue;
 
-            if (!Fs.Exists(e.TargetPath))
+            if (e.Action == PlanAction.Skip)
             {
-                work[i] = e with { Action = PlanAction.Full };
-                tally.Skip--;
+                if (!Fs.Exists(e.TargetPath))
+                {
+                    work[i] = e with { Action = PlanAction.Full };
+                    tally.Skip--;
+                    continue;
+                }
+
+                if (_cfg.VerifyUnchangedFiles
+                    && !string.Equals(Hashing.Md5File(e.TargetPath), e.Target.MD5, StringComparison.OrdinalIgnoreCase))
+                {
+                    work[i] = e with { Action = PlanAction.Full };
+                    tally.Skip--;
+                }
+
                 continue;
             }
 
-            if (_cfg.VerifyUnchangedFiles
-                && !string.Equals(Hashing.Md5File(e.TargetPath), e.Target.MD5, StringComparison.OrdinalIgnoreCase))
+            if (verifyAgainstDisk
+                && e.Action == PlanAction.Full
+                && Fs.Exists(e.TargetPath)
+                && string.Equals(Hashing.Md5File(e.TargetPath), e.Target.MD5, StringComparison.OrdinalIgnoreCase))
             {
-                work[i] = e with { Action = PlanAction.Full };
-                tally.Skip--;
+                work[i] = e with { Action = PlanAction.Skip };
+                tally.Skip++;
             }
         }
 
@@ -213,9 +238,9 @@ public sealed class Updater
             return Finish(log, tally, sw, UpdateOutcome.Updated, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
         }
 
-        // 失败收敛（§4.5）：本地内容不一致导致的失败多到一定程度，判定需要完整包
-        var outcome = tally.Fail >= 3 ? UpdateOutcome.NeedsFullPackage : UpdateOutcome.Failed;
-        var why = tally.Fail >= 3 ? UpdateReasons.LocalCorrupt : UpdateReasons.DownloadFailed;
+        // 失败收敛（§4.5）：连完整下载都失败的文件达到 5 个，判定本地状态不可信，交回宿主
+        var outcome = tally.Fail >= FailToleranceForHostFallback ? UpdateOutcome.NeedsHostFallback : UpdateOutcome.Failed;
+        var why = tally.Fail >= FailToleranceForHostFallback ? UpdateReasons.LocalCorrupt : UpdateReasons.DownloadFailed;
         return Finish(log, tally, sw, outcome, why, $"{tally.Fail} 个文件失败");
     }
 
