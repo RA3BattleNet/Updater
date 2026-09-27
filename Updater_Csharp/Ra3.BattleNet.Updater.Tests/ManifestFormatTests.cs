@@ -1,12 +1,11 @@
-using Ra3.BattleNet.Updater.Core;
 using Ra3.BattleNet.Updater.Share.Models;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
 /// <summary>
-/// manifest 格式契约（AGENT.md §3.1 / §7.3）：
-/// 读写往返对称、<c>Type</c> 为 <c>Text</c> 时不得退化成 Bin、
-/// 且必须能读**仓库里真实存在的遗留写法**。
+/// manifest 格式契约（AGENT.md §3.1 / §7.3）：读写往返对称、<c>Type</c> 为 <c>Text</c> 时
+/// 不得退化成 Bin、哈希字段是**裸的 32 位小写十六进制**（两侧都不加、也不容忍算法前缀）、
+/// 目录路径既可能是正斜杠也可能是反斜杠（C++ 侧就写 <c>\</c> 与 <c>\dir\</c>）。
 /// </summary>
 public class ManifestFormatTests
 {
@@ -47,115 +46,80 @@ public class ManifestFormatTests
         Assert.Equal("APPLICATION;TEXT;", g.KindOf);
     }
 
+    /// <summary>
+    /// 「两侧简单对齐」的那条线：写出来的必须是裸十六进制 + 枚举名。
+    /// 哈希带算法前缀、或 <c>Type</c> 写成数字，都会让另一端对不上。
+    /// </summary>
     [Fact]
-    public void WrittenHash_IsBareLowercaseHex_WithoutAlgorithmPrefix()
+    public void WrittenManifest_UsesBareHashAndEnumNames()
     {
         using var tmp = new TempDir();
         var m = TestSupport.NewManifest();
-        TestSupport.Add(m, "a.bin", "\\", TestSupport.Md5("A"));
+        TestSupport.Add(m, "a.bin", "\\", TestSupport.Md5("A"), FileModeEnum.Force)
+            .Type = FileTypeEnum.Text;
 
         var path = Path.Combine(tmp.Path, "m.xml");
         m.SaveToXml(path);
 
         var xml = File.ReadAllText(path);
+
         Assert.Contains("<MD5>" + TestSupport.Md5("A") + "</MD5>", xml);
+        Assert.Contains("<Type>Text</Type>", xml);
+        Assert.Contains("<Mode>Force</Mode>", xml);
         Assert.DoesNotContain("MD5:", xml);
+        Assert.DoesNotContain("<Type>1</Type>", xml);
     }
 
     /// <summary>
-    /// 逐字抄自仓库遗留样例 Updater/Updater_Cpp/test/new/manifest.xml：
-    /// Type 是**数字** 1、MD5 带 MD5: 前缀、Path 是反斜杠根路径。
-    /// 这三处在旧实现里全都踩过坑，必须能被同一份代码读进来。
+    /// 哈希字段带算法前缀（`MD5:ad63…`）是**错误的写法**，不做兼容、也不剥前缀：
+    /// 必须当场响亮地失败，而不是被静默接受后拿去拼出错误的 URL。
     /// </summary>
-    private const string LegacyManifest = """
-        <?xml version="1.0" encoding="utf-8"?>
-        <Metadata Version="2.0.0">
-          <Tags>
-            <UUID>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</UUID>
-            <GenTime>1700000001</GenTime>
-            <Commit>测试新版本 v2</Commit>
-          </Tags>
-          <Includes />
-          <Manifest>
-            <File>
-              <UUID>11111111111111111111111111111111</UUID>
-              <FileName>test.txt</FileName>
-              <MD5>MD5:ad6356ae5c390825abc0b2409192a765</MD5>
-              <Path>\</Path>
-              <Version>2.0.0</Version>
-              <Type>1</Type>
-              <Mode>Auto</Mode>
-              <KindOf>TEST;NEW;</KindOf>
-            </File>
-            <File>
-              <UUID>22222222222222222222222222222222</UUID>
-              <FileName>nested.bin</FileName>
-              <MD5>md5:39EBBB4AD56E8B32423526FFBF1C455E</MD5>
-              <Path>\CoronaResources\Data\</Path>
-              <Version>2.0.0</Version>
-              <Type>Bin</Type>
-              <Mode>Force</Mode>
-              <KindOf>NULL</KindOf>
-            </File>
-          </Manifest>
-        </Metadata>
-        """;
-
     [Fact]
-    public void LegacyManifest_IsReadable_HashNormalized_AndPathUsable()
+    public void HashField_WithAlgorithmPrefix_IsRejectedLoudly()
     {
         using var tmp = new TempDir();
-        var path = Path.Combine(tmp.Path, "legacy.xml");
-        File.WriteAllText(path, LegacyManifest);
+        var path = Path.Combine(tmp.Path, "bad.xml");
+        File.WriteAllText(path, """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Metadata Version="1.0.0">
+              <Tags><UUID>11111111111111111111111111111111</UUID><GenTime>1700000001</GenTime><Commit>x</Commit></Tags>
+              <Includes />
+              <Manifest>
+                <File>
+                  <UUID>22222222222222222222222222222222</UUID>
+                  <FileName>a.bin</FileName>
+                  <MD5>MD5:ad6356ae5c390825abc0b2409192a765</MD5>
+                  <Path>\</Path>
+                  <Version>1.0.0</Version>
+                  <Type>Bin</Type>
+                  <Mode>Auto</Mode>
+                  <KindOf>NULL</KindOf>
+                </File>
+              </Manifest>
+            </Metadata>
+            """);
 
-        var m = new ManifestModel(path);
-
-        Assert.Equal("2.0.0", m.Version.ToString());
-        Assert.Equal(new Guid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), m.Tags.UUID);
-        Assert.Equal(2, m.Manifest.Files.Count);
-
-        var a = m.Manifest.Files[0];
-        Assert.Equal("ad6356ae5c390825abc0b2409192a765", a.MD5);   // 前缀被剥掉
-        Assert.Equal(FileTypeEnum.Text, a.Type);                 // 数字 1 也要认
-        Assert.Equal(FileModeEnum.Auto, a.Mode);
-        Assert.Equal("test.txt", a.RelativePath());              // Path="\" ⇒ 就是根下的文件名
-
-        var b = m.Manifest.Files[1];
-        Assert.Equal("39ebbb4ad56e8b32423526ffbf1c455e", b.MD5);   // 大小写与前缀都归一
-        Assert.Equal("CoronaResources/Data/nested.bin", b.RelativePath());
-        Assert.Equal(FileModeEnum.Force, b.Mode);
+        Assert.Throws<ArgumentException>(() => new ManifestModel(path));
     }
 
     /// <summary>
-    /// 容忍遗留写法的**商业理由**：读不进来就会被判成"本地清单损坏"，
-    /// 于是本地明明是对的也要重下整棵树。这里把它钉死成"零下载"。
+    /// 目录路径的归一化：C++ 侧写的是 <c>\</c>（根）与 <c>\Dir\Sub\</c>（子目录）。
+    /// 「目录 + 文件名」合成相对路径这条语义与分隔符无关。
     /// </summary>
     [Fact]
-    public void LegacyLocalManifest_StillYieldsASkipPlan_SoNothingIsRedownloaded()
+    public void BackslashDirectoryPaths_AreNormalizedToRelativePaths()
     {
         using var tmp = new TempDir();
+        var m = TestSupport.NewManifest();
+        TestSupport.Add(m, "root.txt", "\\", TestSupport.Md5("1"));
+        TestSupport.Add(m, "nested.bin", "\\CoronaResources\\Data\\", TestSupport.Md5("2"));
 
-        var client = tmp.Sub("client");
-        TestSupport.WriteTree(client, ("test.txt", "legacy content"));
+        var path = Path.Combine(tmp.Path, "m.xml");
+        m.SaveToXml(path);
 
-        var legacyLocal = LegacyManifest.Replace(
-            "MD5:ad6356ae5c390825abc0b2409192a765",
-            TestSupport.Md5File(Path.Combine(client, "test.txt")));
-        var localPath = Path.Combine(client, "manifest.xml");
-        File.WriteAllText(localPath, legacyLocal);
+        var files = new ManifestModel(path).Manifest.Files.ToDictionary(f => f.FileName);
 
-        // 远端清单里，同一个文件（同 UUID、内容未变）只是换了版本号
-        var remote = TestSupport.NewManifest("2.0.0");
-        remote.Manifest.Files.Add(new ManifestFile(
-            new Guid("11111111111111111111111111111111"), "test.txt",
-            TestSupport.Md5("legacy content"), "\\", "2.0.0",
-            FileTypeEnum.Bin, FileModeEnum.Auto, "TEST;"));
-
-        var plan = UpdatePlanner.Build(remote, new ManifestModel(localPath),
-            new UpdateConfig { RootPath = client, ManifestUrl = "http://example.invalid/manifest.xml" });
-
-        Assert.Equal(1, plan.Total);
-        Assert.Equal(1, plan.Unchanged);
-        Assert.Equal(0, plan.ToDownload);
+        Assert.Equal("root.txt", files["root.txt"].RelativePath());
+        Assert.Equal("CoronaResources/Data/nested.bin", files["nested.bin"].RelativePath());
     }
 }

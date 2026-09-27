@@ -286,7 +286,7 @@ namespace Ra3.BattleNet.Updater.Share.Models
                     }
                     ManifestFile temp = new ManifestFile(tempuuid,
                         item["FileName"].InnerText,
-                        NormalizeHash(item["MD5"].InnerText),
+                        item["MD5"].InnerText,
                         item["Path"].InnerText,
                         item["Version"].InnerText,
                         (FileTypeEnum)Enum.Parse(typeof(FileTypeEnum),item["Type"].InnerText),
@@ -306,20 +306,6 @@ namespace Ra3.BattleNet.Updater.Share.Models
             //}
             
     }
-
-        /// <summary>
-        /// 归一化清单里的哈希字段：统一成 32 位小写十六进制（AGENT.md §3.1）。
-        /// 容错点是**已确认存在**的历史写法 —— 仓库里遗留的清单样例写作
-        /// &lt;MD5&gt;MD5:ad63…&lt;/MD5&gt;（带算法前缀）。不归一化的话 ManifestFile 的长度校验
-        /// 会直接抛异常，整份本地清单作废 ⇒ 退化成全量重下。
-        /// </summary>
-        private static string NormalizeHash(string raw)
-        {
-            var v = raw.Trim();
-            var colon = v.IndexOf(':');
-            if (colon >= 0) v = v[(colon + 1)..].Trim();
-            return v.ToLowerInvariant();
-        }
     }
 
 
