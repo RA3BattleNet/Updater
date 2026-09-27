@@ -80,6 +80,7 @@ public class EndToEndTests
         Assert.Contains(log, l => l.StartsWith("F\t", StringComparison.Ordinal) && l.Contains("\tpatch\t"));
         Assert.Contains(log, l => l.StartsWith("F\t", StringComparison.Ordinal) && l.Contains("\tmove\t"));
         var runLine = log.Single(l => l.StartsWith("R\t", StringComparison.Ordinal));
+        Assert.Matches(@"^R\t[^\t]+\t[0-9a-f]{32}\t", runLine);  // R 行必须带 manifest 哈希
         Assert.Contains("\tUpdated", runLine);
 
         // 6) 再来一次：必须早退（304 或内容哈希一致），不做任何下载

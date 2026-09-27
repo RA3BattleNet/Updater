@@ -81,6 +81,7 @@ public sealed class Updater
 
         var remoteBytes = manifest.Content!;
         var remoteHash = Hashing.Md5(remoteBytes);
+        tally.ManifestHash = remoteHash;
         Fs.WriteAllBytes(remotePath, remoteBytes);
         if (!string.IsNullOrEmpty(manifest.ETag)) Fs.WriteAllText(etagPath, manifest.ETag!);
 
@@ -358,7 +359,7 @@ public sealed class Updater
     private UpdateResult Finish(UpdateLog log, Tally t, Stopwatch sw, UpdateOutcome outcome, string reason, string detail)
     {
         sw.Stop();
-        log.Run(string.Empty, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
+        log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             (long)sw.Elapsed.TotalMilliseconds, outcome.ToString());
 
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed, detail);
@@ -398,5 +399,6 @@ public sealed class Updater
         public int Full;
         public int Fail;
         public long Bytes;
+        public string ManifestHash = string.Empty;
     }
 }

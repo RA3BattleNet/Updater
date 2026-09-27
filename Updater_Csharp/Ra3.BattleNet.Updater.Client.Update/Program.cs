@@ -49,7 +49,7 @@ internal static class Program
         {
             Console.WriteLine(JsonSerializer.Serialize(new
             {
-                result.Outcome,
+                Outcome = result.Outcome.ToString(),
                 result.Reason,
                 result.Detail,
                 result.Total,

@@ -1,3 +1,9 @@
+> ⚠️ **本文档描述的是历史实现（离线补丁包 + patches.json 在线链路）。**
+> 在线增量更新的当前设计与实现以仓库根目录的 [README.md](../README.md) 为准；
+> 其中的 `Ra3.BattleNet.Updater.Server.PatchIndexGenerator` 与 `Ra3.BattleNet.Updater.Client.PatchIndexApplyer`
+> **已被移除**，分别由 `Ra3.BattleNet.Updater.Server.PatchGenerator` 与
+> `Ra3.BattleNet.Updater.Client.Update` 取代。
+> 文中的 XML/补丁格式说明、模式（Auto/Force/Skip）语义、HDiffPatch 选型对比仍然有效。
 # Ra3.BattleNet.Updater
 
 文件增量更新器
