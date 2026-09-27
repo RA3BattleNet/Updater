@@ -155,9 +155,8 @@ public sealed class Updater
                 UpdateReasons.LocalCorrupt, 0, 0);
 
         // 本地清单缺失/损坏时，计划里每个文件都会是「完整下载」—— 那等于把整个产品重下。
-        // 正确做法是**退化成按磁盘哈希校验**：命中就跳过。花 CPU，不花带宽（AGENT.md §4.10）。
-        var verifyAgainstDisk = local is null;
-
+        // 正确做法是**退化为按磁盘哈希校验**：命中就跳过。花 CPU，不花带宽（AGENT.md §4.10）。
+        // 这个判断现在对所有"本次要动"的文件都生效（见下面的 LooksAlreadyUpdated）。
         var work = plan.Entries.ToList();
         for (var i = 0; i < work.Count; i++)
         {
@@ -172,8 +171,7 @@ public sealed class Updater
                     continue;
                 }
 
-                if (_cfg.VerifyUnchangedFiles
-                    && !string.Equals(Hashing.Md5File(e.TargetPath), e.Target.MD5, StringComparison.OrdinalIgnoreCase))
+                if (_cfg.VerifyUnchangedFiles && !LooksAlreadyUpdated(e))
                 {
                     work[i] = e with { Action = PlanAction.Full };
                     tally.Skip--;
@@ -182,10 +180,15 @@ public sealed class Updater
                 continue;
             }
 
-            if (verifyAgainstDisk
-                && e.Action == PlanAction.Full
-                && Fs.Exists(e.TargetPath)
-                && string.Equals(Hashing.Md5File(e.TargetPath), e.Target.MD5, StringComparison.OrdinalIgnoreCase))
+            // §4.3 步骤①：目标路径上**已经就是目标内容** → 跳过。
+            // 计划只看得见两份 manifest，看不见两件事：
+            //   - "上次跑到一半已经把这个文件弄好了"（本设计"有失败就不写本地清单"，
+            //     所以一次部分失败的运行必然留下"磁盘比清单新"的状态）；
+            //   - "别的程序/用户已经把它换成新版了"。
+            // 不查这一下，重跑就会把已经弄好的文件再完整下载一遍 —— 实测 v4→v5 中断后重跑
+            // 多下 30%（373 MB vs 一次跑完 286 MB），F6 的"已完成的不重复下载"就不成立。
+            // 代价只是对**本次要动的文件**各算一次哈希（未变文件不碰），远小于重下的带宽。
+            if (e.Action is PlanAction.Patch or PlanAction.Full && LooksAlreadyUpdated(e))
             {
                 work[i] = e with { Action = PlanAction.Skip };
                 tally.Skip++;
@@ -278,6 +281,25 @@ public sealed class Updater
         var outcome = tally.Fail >= tolerance ? UpdateOutcome.NeedsHostFallback : UpdateOutcome.Failed;
         var why = tally.Fail >= tolerance ? UpdateReasons.LocalCorrupt : UpdateReasons.DownloadFailed;
         return Finish(log, tally, sw, outcome, why, $"{tally.Fail} 个文件失败");
+    }
+
+    /// <summary>
+    /// 目标路径上是否已经是目标内容（§4.3 步骤①）。
+    /// 读不了（文件被独占、权限不足…）就当作"不是" —— 这里回答的是"能不能少下一次"，
+    /// 答案不确定时应当继续往下走，让正常流程去**如实报出那个具体原因**
+    /// （被占用/IO 错误会由 FullAsync 分类成 file_in_use / io_error）。异常绝不能从这里逃出去（§4.12）。
+    /// </summary>
+    private static bool LooksAlreadyUpdated(PlanEntry e)
+    {
+        try
+        {
+            return Fs.Exists(e.TargetPath)
+                && string.Equals(Hashing.Md5File(e.TargetPath), e.Target.MD5, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<(PlanAction Action, int Status, string Reason, long Bytes)> ProcessEntryAsync(
