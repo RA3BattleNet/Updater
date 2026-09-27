@@ -30,6 +30,21 @@ public sealed record UpdateConfig
     public int MaxConcurrency { get; init; } = 4;
 
     /// <summary>
+    /// 「连完整下载都失败」的文件数达到该值即判定本地状态不可信、交回宿主。
+    /// 这是**绝对下限**，最终阈值取 <c>max(本值, ceil(比例 × 待处理文件数))</c>。
+    /// 注意：**不是**"每个文件补丁重试 N 次"——补丁失败是**当次立即回落完整下载**，不重试补丁本身。
+    /// </summary>
+    public int MinFailuresForHostFallback { get; init; } = 5;
+
+    /// <summary>同上，按比例（相对本次待处理文件数）。大发布里少量噪声失败不该惊动宿主。</summary>
+    public double FailRatioForHostFallback { get; init; } = 0.10;
+
+    /// <summary>按本次待处理文件数算出的实际失败容忍度。</summary>
+    public int EffectiveFailTolerance(int plannedFiles) =>
+        Math.Max(MinFailuresForHostFallback,
+                 (int)Math.Ceiling(Math.Max(0, plannedFiles) * FailRatioForHostFallback));
+
+    /// <summary>
     /// 可选保险丝：待下载文件数超过该值即交回宿主。**默认 0 = 关闭**。
     /// 这不是「文件多就走全量」——变更文件越多，增量越有价值。
     /// </summary>

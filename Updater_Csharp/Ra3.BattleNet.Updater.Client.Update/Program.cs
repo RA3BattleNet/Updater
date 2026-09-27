@@ -52,6 +52,7 @@ internal static class Program
                 Outcome = result.Outcome.ToString(),
                 result.Reason,
                 result.Detail,
+                result.HttpVersion,
                 result.Total,
                 result.Skipped,
                 result.Moved,

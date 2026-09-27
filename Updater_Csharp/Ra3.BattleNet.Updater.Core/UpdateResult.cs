@@ -32,14 +32,16 @@ public sealed record UpdateResult(
     int FailedCount,
     long BytesDownloaded,
     TimeSpan Elapsed,
-    string Detail = "")
+    string Detail = "",
+    string HttpVersion = "")
 {
     /// <summary>宿主是否可以跳过自己原有的更新逻辑。</summary>
     public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated;
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
-        $"full={Full} fail={FailedCount} bytes={BytesDownloaded} ms={(long)Elapsed.TotalMilliseconds}";
+        $"full={Full} fail={FailedCount} bytes={BytesDownloaded} ms={(long)Elapsed.TotalMilliseconds}" +
+        (HttpVersion.Length > 0 ? $" http={HttpVersion}" : string.Empty);
 }
 
 /// <summary>原因码（写进日志的 reason 列，稳定枚举，只增不改）。</summary>

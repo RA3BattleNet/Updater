@@ -70,6 +70,8 @@ public class EndToEndTests
         Assert.True(result.Full >= 1, "新增文件应当走完整下载");
         Assert.True(result.Skipped >= 1, "未变文件应当跳过");
         Assert.Equal(0, result.FailedCount);
+        Assert.Equal(string.Empty, result.Detail);
+        Assert.Equal("HTTP/1.1", result.HttpVersion);   // 明文连接
 
         // 4) 结果与 v2 逐字节一致
         TestSupport.AssertSameAs(gen2.Manifest, v2, client);

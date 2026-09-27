@@ -94,3 +94,28 @@ public class UpdatePlannerTests
     private static PlanEntry Find(UpdatePlan plan, string fileName) =>
         plan.Entries.Single(e => e.Target.FileName == fileName);
 }
+
+/// <summary>失败容忍度：max(绝对下限, 比例 × 待处理文件数)。</summary>
+public class FailToleranceTests
+{
+    private static UpdateConfig Cfg() => new() { RootPath = ".", ManifestUrl = "http://localhost/manifest.xml" };
+
+    [Fact]
+    public void ScalesWithPlannedFileCount()
+    {
+        var cfg = Cfg();
+        Assert.Equal(5, cfg.EffectiveFailTolerance(0));
+        Assert.Equal(5, cfg.EffectiveFailTolerance(3));
+        Assert.Equal(5, cfg.EffectiveFailTolerance(40));    // 10% = 4 < 下限 5
+        Assert.Equal(10, cfg.EffectiveFailTolerance(100));  // 10% = 10
+        Assert.Equal(30, cfg.EffectiveFailTolerance(300));  // 10% = 30
+    }
+
+    [Fact]
+    public void CanBeTuned()
+    {
+        var cfg = Cfg() with { MinFailuresForHostFallback = 2, FailRatioForHostFallback = 0.5 };
+        Assert.Equal(2, cfg.EffectiveFailTolerance(2));
+        Assert.Equal(3, cfg.EffectiveFailTolerance(6));     // 50% = 3 > 下限 2
+    }
+}

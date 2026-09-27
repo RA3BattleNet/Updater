@@ -15,8 +15,8 @@ public sealed class Updater
     private readonly UpdateConfig _cfg;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _blobLocks = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>连完整下载都失败的文件达到该数量时，判定本地状态不可信、交回宿主（AGENT.md §4.5）。</summary>
-    private const int FailToleranceForHostFallback = 5;
+
+
 
     public Updater(UpdateConfig cfg) => _cfg = cfg;
 
@@ -77,10 +77,10 @@ public sealed class Updater
 
         var manifest = await fetcher.GetManifestAsync(_cfg.ManifestUrl, localHash is null ? null : etag, ct);
         if (!manifest.Ok)
-            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, manifest.Reason);
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, manifest.Reason, manifest.HttpVersion ?? string.Empty);
 
         if (manifest.NotModified)
-            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
+            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
 
         var remoteBytes = manifest.Content!;
         var remoteHash = Hashing.Md5(remoteBytes);
@@ -89,7 +89,7 @@ public sealed class Updater
         if (!string.IsNullOrEmpty(manifest.ETag)) Fs.WriteAllText(etagPath, manifest.ETag!);
 
         if (localHash is not null && string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
-            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
+            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
 
         ManifestModel remote;
         try
@@ -98,7 +98,7 @@ public sealed class Updater
         }
         catch (Exception ex)
         {
-            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, ex.Message);
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, ex.Message, manifest.HttpVersion ?? string.Empty);
         }
 
         ManifestModel? local = null;
@@ -132,7 +132,7 @@ public sealed class Updater
         if (overFiles || overRatio)
         {
             return Finish(log, tally, sw, UpdateOutcome.NeedsHostFallback, UpdateReasons.WorkloadTooLarge,
-                $"待下载 {plan.ToDownload}/{plan.Total} 个文件，超过配置的保护阈值");
+                $"待下载 {plan.ToDownload}/{plan.Total} 个文件，超过配置的保护阈值", manifest.HttpVersion ?? string.Empty);
         }
 
         if (localCorrupt)
@@ -235,12 +235,13 @@ public sealed class Updater
             var tmp = localManifestPath + ".tmp";
             Fs.WriteAllBytes(tmp, remoteBytes);
             Fs.Place(tmp, localManifestPath);
-            return Finish(log, tally, sw, UpdateOutcome.Updated, UpdateReasons.None, manifest.HttpVersion ?? string.Empty);
+            return Finish(log, tally, sw, UpdateOutcome.Updated, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
         }
 
         // 失败收敛（§4.5）：连完整下载都失败的文件达到 5 个，判定本地状态不可信，交回宿主
-        var outcome = tally.Fail >= FailToleranceForHostFallback ? UpdateOutcome.NeedsHostFallback : UpdateOutcome.Failed;
-        var why = tally.Fail >= FailToleranceForHostFallback ? UpdateReasons.LocalCorrupt : UpdateReasons.DownloadFailed;
+        var tolerance = _cfg.EffectiveFailTolerance(totalWork);
+        var outcome = tally.Fail >= tolerance ? UpdateOutcome.NeedsHostFallback : UpdateOutcome.Failed;
+        var why = tally.Fail >= tolerance ? UpdateReasons.LocalCorrupt : UpdateReasons.DownloadFailed;
         return Finish(log, tally, sw, outcome, why, $"{tally.Fail} 个文件失败");
     }
 
@@ -381,13 +382,13 @@ public sealed class Updater
             yield return b.EndsWith('/') ? b : b + "/";
     }
 
-    private UpdateResult Finish(UpdateLog log, Tally t, Stopwatch sw, UpdateOutcome outcome, string reason, string detail)
+    private UpdateResult Finish(UpdateLog log, Tally t, Stopwatch sw, UpdateOutcome outcome, string reason, string detail, string httpVersion = "")
     {
         sw.Stop();
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             (long)sw.Elapsed.TotalMilliseconds, outcome.ToString());
 
-        return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed, detail);
+        return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes, sw.Elapsed, detail, httpVersion);
     }
 
     private static string ActionName(PlanAction action) => action switch
