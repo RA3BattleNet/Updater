@@ -1,5 +1,5 @@
-using Ra3.BattleNet.Updater.Core;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
+using Ra3.BattleNet.Updater.Client;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -24,7 +24,7 @@ public class SingleInstanceTests
             ManifestUrl = "http://127.0.0.1:1/manifest.xml",
         };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.AlreadyRunning, result.Reason);

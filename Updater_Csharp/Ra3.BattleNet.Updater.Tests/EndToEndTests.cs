@@ -1,7 +1,7 @@
 using Ra3.BattleNet.Updater.Server;
 using Ra3.BattleNet.Updater.Share.Models;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -62,7 +62,7 @@ public class EndToEndTests
             ManifestUrl = http.BaseUrl + "manifest.xml",
         };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome == UpdateOutcome.Updated, $"期望 Updated，实得 {result}；Detail={result.Detail}");
         Assert.True(result.Patched >= 1, "必须至少有一个文件走补丁");
@@ -87,7 +87,7 @@ public class EndToEndTests
 
         // 6) 再来一次：必须早退（304 或内容哈希一致），不做任何下载
         var before = http.Requests;
-        var again = new CoreUpdater(cfg).Run();
+        var again = new ClientUpdater(cfg).Run();
         Assert.Equal(UpdateOutcome.UpToDate, again.Outcome);
         Assert.Equal(0, again.BytesDownloaded);
         Assert.True(http.NotModified >= 1, "第二次应当命中 If-None-Match 304");
@@ -116,7 +116,7 @@ public class EndToEndTests
 
         using var http = new TestHttpServer(server);
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         // 必须退化为「按磁盘哈希校验」：花 CPU，不花带宽
         Assert.Equal(UpdateOutcome.Updated, result.Outcome);
@@ -158,7 +158,7 @@ public class EndToEndTests
             FullPackageThresholdFiles = 1,   // 待下载 >= 1 即判定需要完整包
         };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
         Assert.True(result.Outcome == UpdateOutcome.NeedsHostFallback, $"期望 NeedsHostFallback，实得 {result}；Detail={result.Detail}");
         Assert.Equal(UpdateReasons.WorkloadTooLarge, result.Reason);
 
@@ -195,7 +195,7 @@ public class EndToEndTests
 
         using var http = new TestHttpServer(server);
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome == UpdateOutcome.Updated, $"期望 Updated，实得 {result}；Detail={result.Detail}");
         Assert.Equal(0, result.Patched);

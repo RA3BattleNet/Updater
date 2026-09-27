@@ -1,4 +1,4 @@
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>
 /// 更新会话配置。产品差异**只能**通过这里表达（AGENT.md §6.3）。

@@ -3,7 +3,7 @@ using System.Diagnostics;
 using Ra3.BattleNet.Updater.Share.Models;
 using Ra3.BattleNet.Updater.Share.Utilities;
 
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>
 /// 更新会话。设计契约见 AGENT.md §4。

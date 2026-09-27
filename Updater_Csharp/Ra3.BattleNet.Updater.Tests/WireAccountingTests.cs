@@ -1,6 +1,6 @@
 using Ra3.BattleNet.Updater.Server;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -30,7 +30,7 @@ public class WireAccountingTests
 
         var client = tmp.Sub("client");          // 空目录 → 1 个文件走完整下载
         using var http = new TestHttpServer(server);
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",
@@ -75,7 +75,7 @@ public class WireAccountingTests
 
         // 所有补丁都 404 → 走完整下载：失败与重试的字节也必须在账上
         using var http = new TestHttpServer(server) { PatchNotFound = true };
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",

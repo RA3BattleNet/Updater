@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>每条日志的状态码（封闭集合，只增不改；AGENT.md §4.11）。</summary>
 internal static class LogStatus

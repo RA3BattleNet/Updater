@@ -1,7 +1,7 @@
 using Ra3.BattleNet.Updater.Server;
 using Ra3.BattleNet.Updater.Share.Models;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -81,7 +81,7 @@ public class CompressedSiblingTests
         var (client, server, manifest, v2) = Prepare(tmp, compress: true);
 
         using var http = new TestHttpServer(server);
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",

@@ -1,4 +1,4 @@
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>更新会话的结果类型（AGENT.md §4.12：宿主只需一个 switch）。</summary>
 public enum UpdateOutcome

@@ -1,4 +1,4 @@
-using Ra3.BattleNet.Updater.Core;
+using Ra3.BattleNet.Updater.Client;
 using Ra3.BattleNet.Updater.Share.Models;
 
 namespace Ra3.BattleNet.Updater.Tests;

@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>长路径友好的文件系统操作（AGENT.md §7.5）。</summary>
 internal static class Fs

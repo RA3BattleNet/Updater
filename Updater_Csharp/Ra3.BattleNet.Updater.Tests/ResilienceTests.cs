@@ -1,6 +1,6 @@
-using Ra3.BattleNet.Updater.Core;
+using Ra3.BattleNet.Updater.Client;
 using Ra3.BattleNet.Updater.Server;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -52,7 +52,7 @@ public class ResilienceTests
         // 第一次：做到第 2 个文件就取消（同步回调，取消时机确定）
         using var cts = new CancellationTokenSource();
         var progress = new SyncProgress<UpdateProgress>(p => { if (p.Current >= 2) cts.Cancel(); });
-        var first = new CoreUpdater(cfg).Run(progress, cts.Token);
+        var first = new ClientUpdater(cfg).Run(progress, cts.Token);
 
         Assert.NotEqual(UpdateOutcome.Updated, first.Outcome);
         Assert.False(File.Exists(Path.Combine(client, "manifest.xml.tmp")), "取消后不该留下半截清单");
@@ -60,12 +60,12 @@ public class ResilienceTests
         Assert.NotEqual(TestSupport.Md5File(m2), TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
 
         // 第二次：正常跑完（已更新的文件会被跳过，只补差的）
-        var second = new CoreUpdater(cfg).Run();
+        var second = new ClientUpdater(cfg).Run();
         Assert.True(second.Outcome == UpdateOutcome.Updated, $"期望 Updated 实得 {second}; Detail={second.Detail}");
         TestSupport.AssertSameAs(gen.Manifest, v2, client);
 
         // 第三次：幂等，什么都不做
-        var third = new CoreUpdater(cfg).Run();
+        var third = new ClientUpdater(cfg).Run();
         Assert.Equal(UpdateOutcome.UpToDate, third.Outcome);
         Assert.Equal(0, third.BytesDownloaded);
     }
@@ -107,7 +107,7 @@ public class ResilienceTests
             FallbackBaseUrls = [httpB.BaseUrl],
         };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome == UpdateOutcome.Updated, $"期望 Updated 实得 {result}");
         Assert.True(httpA.NotFound > 0, "主源应当确实缺载荷");

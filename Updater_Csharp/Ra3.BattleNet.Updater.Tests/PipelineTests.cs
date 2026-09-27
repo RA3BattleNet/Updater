@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Ra3.BattleNet.Updater.Server;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -40,7 +40,7 @@ public class PipelineTests
         var addedMd5 = TestSupport.Md5File(Path.Combine(v2, "new.txt"));
 
         using var http = new TestHttpServer(server);
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",
@@ -110,7 +110,7 @@ public class PipelineTests
         http.ResetPeak();
 
         var sw = Stopwatch.StartNew();
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",

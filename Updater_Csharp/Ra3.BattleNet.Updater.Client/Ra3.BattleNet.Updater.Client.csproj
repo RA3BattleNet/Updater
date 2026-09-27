@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Ra3.BattleNet.Updater.Core</RootNamespace>
+    <RootNamespace>Ra3.BattleNet.Updater.Client</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

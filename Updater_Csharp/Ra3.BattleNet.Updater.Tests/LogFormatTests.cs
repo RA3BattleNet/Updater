@@ -1,7 +1,7 @@
 using System.Text;
 using Ra3.BattleNet.Updater.Server;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -28,7 +28,7 @@ public class LogFormatTests
 
         var client = tmp.Sub("client");
         using var http = new TestHttpServer(server);
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",
@@ -141,7 +141,7 @@ public class LogFormatTests
         using var http = new TestHttpServer(server) { PatchNotFound = true, NotFoundBodyBytes = notFoundBody };
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        Assert.Equal(UpdateOutcome.Updated, new CoreUpdater(cfg).Run().Outcome);
+        Assert.Equal(UpdateOutcome.Updated, new ClientUpdater(cfg).Run().Outcome);
         Assert.True(http.NotFound > 0, "应当真的探过补丁，否则这条测试没测到错误正文");
 
         var first = LastRLine(client);
@@ -149,7 +149,7 @@ public class LogFormatTests
             $"404 的声明正文必须计入 payload：payload={first[13]}, 内容字节={first[9]}, 404×{http.NotFound}×{notFoundBody}");
 
         // 再跑一轮：本地已是最新 → 清单走 304（零正文），不该再产生任何 payload
-        new CoreUpdater(cfg).Run();
+        new ClientUpdater(cfg).Run();
         Assert.True(http.NotModified > 0, "第二轮应当命中清单 304");
 
         var second = LastRLine(client);
@@ -202,7 +202,7 @@ public class LogFormatTests
         File.WriteAllText(logPath, new string('#', 400));
 
         using var http = new TestHttpServer(server);
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",

@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using Ra3.BattleNet.Updater.Core;
+using Ra3.BattleNet.Updater.Client;
 using Ra3.BattleNet.Updater.Server;
 using Ra3.BattleNet.Updater.Share.Models;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -64,7 +64,7 @@ public class RealVersionsTests
         };
 
         sw.Restart();
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
         Console.WriteLine($"更新完成 {sw.Elapsed.TotalSeconds:F1}s：{result}");
 
         Assert.Equal(UpdateOutcome.Updated, result.Outcome);

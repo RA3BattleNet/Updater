@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Ra3.BattleNet.Updater.Core;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
+using Ra3.BattleNet.Updater.Client;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
 namespace Ra3.BattleNet.Updater.Client.Update;
 
@@ -36,7 +36,7 @@ internal static class Program
         UpdateResult result;
         try
         {
-            result = new CoreUpdater(config).Run(progress);
+            result = new ClientUpdater(config).Run(progress);
         }
         catch (Exception ex)
         {

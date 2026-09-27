@@ -15,7 +15,7 @@
 | 项目 | 角色 |
 |---|---|
 | `Ra3.BattleNet.Updater.Share` | 共享层：协议模型（清单格式）、哈希、外部工具封装 |
-| `Ra3.BattleNet.Updater.Core` | **客户端更新引擎**（无 UI、无产品耦合）——**客户端只需引用它** |
+| `Ra3.BattleNet.Updater.Client` | **客户端更新引擎**（无 UI、无产品耦合）——**客户端只需引用它** |
 | `Ra3.BattleNet.Updater.Server` | **服务端发布逻辑**：清单生成 + 生成期自检 + 补丁生成 |
 | `Ra3.BattleNet.Updater.XmlGenerator` | 壳：生成 `manifest.xml`（含自检报告） |
 | `Ra3.BattleNet.Updater.Server.PatchGenerator` | 壳：生成 `patches/` 与 `files/` |
@@ -29,7 +29,7 @@
 
 ### 2.1 怎么引用
 
-- `ProjectReference` 或直接引用 DLL：**`Ra3.BattleNet.Updater.Core`**（TFM `net10.0`）。
+- `ProjectReference` 或直接引用 DLL：**`Ra3.BattleNet.Updater.Client`**（TFM `net10.0`）。
 - **外部工具必须随产物部署**：`hdiffpatch_bin/{win-x64,linux-x64}/{hdiffz,hpatchz}`。
   默认从**程序自身目录**找（`UpdateConfig.ToolsDir` 可改）；`Share` 项目会自动把它们复制到输出目录。
 - 除框架外**没有第三方依赖**（客户端链路只用到 `Share` 的工具封装与模型）。
@@ -37,7 +37,7 @@
 ### 2.2 最小用法
 
 ```csharp
-using Ra3.BattleNet.Updater.Core;
+using Ra3.BattleNet.Updater.Client;
 
 var cfg = new UpdateConfig
 {

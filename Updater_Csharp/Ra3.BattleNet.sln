@@ -16,7 +16,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Serve
 EndProject
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "simple_test_web_server", "simple_test_web_server\simple_test_web_server.pyproj", "{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Core", "Ra3.BattleNet.Updater.Core\Ra3.BattleNet.Updater.Core.csproj", "{6EBB5C94-548A-42E8-8EEC-A72B3DE38935}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Client", "Ra3.BattleNet.Updater.Client\Ra3.BattleNet.Updater.Client.csproj", "{6EBB5C94-548A-42E8-8EEC-A72B3DE38935}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Client.Update", "Ra3.BattleNet.Updater.Client.Update\Ra3.BattleNet.Updater.Client.Update.csproj", "{8232C97F-642E-4DA0-9DBD-8712CEE05850}"
 EndProject

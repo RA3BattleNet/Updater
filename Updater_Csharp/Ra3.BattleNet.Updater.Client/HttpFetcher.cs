@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 internal sealed record DownloadOutcome(bool Ok, int StatusCode, long Bytes, string Reason, long PayloadBytes = 0);
 

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Ra3.BattleNet.Updater.Core\Ra3.BattleNet.Updater.Core.csproj" />
+    <ProjectReference Include="..\Ra3.BattleNet.Updater.Client\Ra3.BattleNet.Updater.Client.csproj" />
     <ProjectReference Include="..\Ra3.BattleNet.Updater.Server\Ra3.BattleNet.Updater.Server.csproj" />
   </ItemGroup>
 

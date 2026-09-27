@@ -1,7 +1,7 @@
 using Ra3.BattleNet.Updater.Server;
 using Ra3.BattleNet.Updater.Share.Models;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -52,7 +52,7 @@ public class GzipTransferTests
         var (client, server, manifest, _, v2) = Prepare(tmp);
 
         using var http = new TestHttpServer(server) { CompressPayloads = true };
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",
@@ -91,7 +91,7 @@ public class GzipTransferTests
             TruncateBytes = 1,
         };
 
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",
@@ -123,7 +123,7 @@ public class GzipTransferTests
 
         // 正常（守规矩）的服务端：截断会被 Range 续传补回来，因为续传那一次要求了 identity
         using var http = new TestHttpServer(server) { CompressPayloads = true, TruncateBytes = 1 };
-        var result = new CoreUpdater(new UpdateConfig
+        var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
             ManifestUrl = http.BaseUrl + "manifest.xml",

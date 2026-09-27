@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using Ra3.BattleNet.Updater.Core;
+using Ra3.BattleNet.Updater.Client;
 using Ra3.BattleNet.Updater.Share.Models;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -73,7 +73,7 @@ public class VersionMatrixSimulation
     {
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
         if (tweak is not null) cfg = tweak(cfg);
-        return new CoreUpdater(cfg).Run(progress, ct);
+        return new ClientUpdater(cfg).Run(progress, ct);
     }
 
     // ---------------------------------------------------------------- 比对与统计

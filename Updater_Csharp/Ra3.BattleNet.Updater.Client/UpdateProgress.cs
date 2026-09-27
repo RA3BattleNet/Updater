@@ -1,4 +1,4 @@
-namespace Ra3.BattleNet.Updater.Core;
+namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>进度上报：分母是**待更新文件数**（AGENT.md §4.7）。</summary>
 public sealed record UpdateProgress(int Current, int Total, string FileName, string Stage);

@@ -2,8 +2,8 @@ using System.Diagnostics;
 using Ra3.BattleNet.Updater.Server;
 using Ra3.BattleNet.Updater.Share.Models;
 using Ra3.BattleNet.Updater.Share.Utilities;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
-using Ra3.BattleNet.Updater.Core;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
+using Ra3.BattleNet.Updater.Client;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -136,7 +136,7 @@ public class LargeFileTests
 
         using var http = new TestHttpServer(server);
         var sw = Stopwatch.StartNew();
-        var result = new CoreUpdater(new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" }).Run();
+        var result = new ClientUpdater(new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" }).Run();
         sw.Stop();
 
         var exact = TestSupport.Md5File(Path.Combine(vNew, "payload.iso")) == TestSupport.Md5File(Path.Combine(client, "payload.iso"));
@@ -239,7 +239,7 @@ public class LargeFileTests
 
         using var http = new TestHttpServer(server) { TruncateBytes = 1 };   // 每次响应少发 1 字节 → 逼出续传
         var sw = Stopwatch.StartNew();
-        var result = new CoreUpdater(new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" }).Run();
+        var result = new ClientUpdater(new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" }).Run();
         sw.Stop();
 
         var isoFile = Path.Combine(client, "payload.iso");

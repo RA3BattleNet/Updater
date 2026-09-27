@@ -1,6 +1,6 @@
-using Ra3.BattleNet.Updater.Core;
+using Ra3.BattleNet.Updater.Client;
 using Ra3.BattleNet.Updater.Server;
-using CoreUpdater = Ra3.BattleNet.Updater.Core.Updater;
+using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -51,7 +51,7 @@ public class FaultInjectionTests
         using var http = new TestHttpServer(server) { TruncateBytes = 1 };
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         // 服务端支持 Range，客户端应当用「续传」把缺的那截补回来（§4.6），而不是整包重下
         Assert.True(result.Outcome == UpdateOutcome.Updated, $"应当靠续传恢复，实得 {result}; Detail={result.Detail}");
@@ -81,7 +81,7 @@ public class FaultInjectionTests
         };
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome == UpdateOutcome.Updated,
             $"应当靠显式 bytes=0- 的重试恢复，实得 {result}; Detail={result.Detail}");
@@ -108,7 +108,7 @@ public class FaultInjectionTests
         };
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome is UpdateOutcome.Failed or UpdateOutcome.NeedsHostFallback,
             $"无法补救的截断必须收敛为失败，实得 {result}");
@@ -139,7 +139,7 @@ public class FaultInjectionTests
         using var http = new TestHttpServer(server);
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome == UpdateOutcome.Updated, $"应当回落成功，实得 {result}; Detail={result.Detail}");
         Assert.Equal(0, result.Patched);
@@ -161,14 +161,14 @@ public class FaultInjectionTests
         // 占住其中一个目标文件
         using (File.Open(Path.Combine(client, "f0.bin"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            var result = new CoreUpdater(cfg).Run();
+            var result = new ClientUpdater(cfg).Run();
             Assert.True(result.FailedCount > 0, "被占用的文件必须计入失败");
             Assert.NotEqual(UpdateOutcome.Updated, result.Outcome);
             Assert.NotEqual(TestSupport.Md5File(m2), TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
         }
 
         // 释放后重跑应当成功
-        var again = new CoreUpdater(cfg).Run();
+        var again = new ClientUpdater(cfg).Run();
         Assert.True(again.Outcome == UpdateOutcome.Updated, $"释放后应当成功，实得 {again}");
     }
 
@@ -183,7 +183,7 @@ public class FaultInjectionTests
         using var http = new TestHttpServer(server);
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.ManifestUnavailable, result.Reason);
@@ -206,7 +206,7 @@ public class FaultInjectionTests
         };
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var result = new CoreUpdater(cfg).Run();   // 不得抛异常（§4.12 绝不抛）
+        var result = new ClientUpdater(cfg).Run();   // 不得抛异常（§4.12 绝不抛）
         sw.Stop();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
@@ -238,7 +238,7 @@ public class FaultInjectionTests
         using var http = new TestHttpServer(server);
         var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
 
-        var result = new CoreUpdater(cfg).Run();
+        var result = new ClientUpdater(cfg).Run();
 
         Assert.NotEqual(UpdateOutcome.Updated, result.Outcome);
         Assert.True(result.FailedCount > 0, "写不进去必须计入失败");
