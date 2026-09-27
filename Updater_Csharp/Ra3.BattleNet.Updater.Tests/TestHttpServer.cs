@@ -60,6 +60,9 @@ internal sealed class TestHttpServer : IDisposable
     /// <summary>是否支持 Range（206）。关掉它就能测「截断后无法续传」的路径。</summary>
     public bool SupportRange { get; set; } = true;
 
+    /// <summary>true 时所有 <c>/patches/</c> 请求都返回 404（模拟"服务端没有该内容对的补丁"）。</summary>
+    public bool PatchNotFound { get; set; }
+
     public TestHttpServer(string root)
     {
         _root = Path.GetFullPath(root);
@@ -141,6 +144,9 @@ internal sealed class TestHttpServer : IDisposable
             }
 
             var file = ResolveFile(urlPath);
+            if (PatchNotFound && urlPath.StartsWith("/patches/", StringComparison.OrdinalIgnoreCase))
+                file = null;
+
             if (file is null)
             {
                 Interlocked.Increment(ref _notFound);
