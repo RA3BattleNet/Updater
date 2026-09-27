@@ -68,6 +68,10 @@ internal sealed class HttpFetcher : IDisposable
                 return new ManifestOutcome(false, false, null, null, $"manifest HTTP {(int)resp.StatusCode}", version);
 
             var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
+            // 清单也要计入"这次更新花了多少带宽"：它每次都要下（除非 304），
+            // 小增量里它占比很可观（1.3 MB vs 几 MB）。注意主机若自己做了 Content-Encoding，
+            // 这里计到的是**解压后**的字节（§2.2 的口径说明见 AGENT.md）。
+            Interlocked.Add(ref _wire, bytes.Length);
             return new ManifestOutcome(true, false, bytes, resp.Headers.ETag?.Tag, string.Empty, version);
         }
         catch (Exception ex)

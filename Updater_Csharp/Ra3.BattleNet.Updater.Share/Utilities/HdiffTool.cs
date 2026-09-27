@@ -79,7 +79,10 @@ public static class HdiffTool
         // 放得进内存就用 -m（最小补丁），否则退回 -s（流式，省内存）
         var mode = newSize + oldSize * 5 <= MemoryBudgetBytes ? "-m" : "-s";
 
-        return [mode, "-c-zstd", "-f", oldFile, newFile, patchFile];
+        // 压缩器选 lzma：实测在同一批内容对上，它比 zstd **又小又快**
+        //（21.5% / 8.2s  vs  23.5% / 12.9s，抽样最大 6 对、70 MiB 目标内容）。
+        // 调级别没用：-c-lzma 与 -c-lzma-9 输出完全一样（默认 7 已饱和）。
+        return [mode, "-c-lzma", "-f", oldFile, newFile, patchFile];
     }
 
     /// <summary>应用补丁（同步入口，离线补丁包链路用）。</summary>

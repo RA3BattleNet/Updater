@@ -177,6 +177,10 @@ public class CompressedFileVariantTests
         Assert.Equal(UpdateOutcome.Updated, result.Outcome);
         TestSupport.AssertSameAs(manifest, v2, client);
         Assert.DoesNotContain(http.RequestPaths, p => p.StartsWith("/files/") && p.EndsWith(".gz", StringComparison.Ordinal));
-        Assert.Equal(result.BytesDownloaded, result.WireDownloaded);   // 没压缩：内容字节 == 网线字节
+
+        // 没走压缩变体：网线字节 ≈ 内容字节 + 清单（清单也计入上网字节）
+        Assert.True(result.WireDownloaded > result.BytesDownloaded, "网线字节应当还包含清单本身");
+        Assert.True(result.WireDownloaded < result.BytesDownloaded * 1.5,
+            $"没压缩时两者应当接近：wire={result.WireDownloaded} content={result.BytesDownloaded}");
     }
 }
