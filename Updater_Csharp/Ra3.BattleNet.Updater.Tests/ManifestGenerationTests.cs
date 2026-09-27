@@ -144,3 +144,137 @@ public class ManifestGenerationTests
         Assert.Equal(1, report.Split("➜ 操作").Length - 1);
     }
 }
+/// <summary>
+/// 自动关联改名（`XmlGenerator --auto-link-uuids`）。
+/// 猜的逻辑：**同名优先 → 尺寸窗口兜底 → 贪心 1:1**。理由与实测见 XmlGenerator/README.md。
+/// </summary>
+public class AutoLinkTests
+{
+    [Fact]
+    public void NameMatch_LinksUuid_SoTheClientCanPatch()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        // 典型的"运行时搬家"：同名、目录变了、内容也变了
+        TestSupport.WriteTree(v1,
+            ("bin/System.Private.CoreLib.dll", TestSupport.Big("RUNTIME-8", 16 * 1024)),
+            ("bin/keep.txt", "keep"));
+        TestSupport.WriteTree(v2,
+            ("dotnet/shared/10.0.5/System.Private.CoreLib.dll", TestSupport.Big("RUNTIME-10", 16 * 1024)),
+            ("bin/keep.txt", "keep"));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var off = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.ByNameAndSize);
+
+        // 不开开关：认不出来 → 新增/消失
+        Assert.Equal(1, off.Added.Count);
+        Assert.Equal(1, off.Removed.Count);
+        Assert.Empty(off.AutoLinked);
+
+        // 开开关：按同名接上，且 UUID 等于前身的
+        var link = Assert.Single(on.AutoLinked);
+        Assert.Equal(RenameLinkEvidence.Name, link.Evidence);
+        Assert.Equal("System.Private.CoreLib.dll", link.Added.FileName);
+        Assert.Equal(link.Removed.UUID, link.Added.UUID);
+
+        // 权威输入是"写出去的 XML 再读回来"：UUID 必须真的被改过
+        var outXml = Path.Combine(tmp.Path, "v2.xml");
+        on.Manifest.SaveToXml(outXml);
+        var reread = new ManifestModel(outXml).Manifest.Files.Single(f => f.FileName == "System.Private.CoreLib.dll");
+        Assert.Equal(link.Removed.UUID, reread.UUID);
+
+        // 报告必须说清楚"改了什么、凭什么改的"
+        var report = ManifestGenerator.FormatReport(on, m1, v1);
+        Assert.Contains("已自动关联改名 1 对", report);
+        Assert.Contains("依据 同名", report);
+    }
+
+    [Fact]
+    public void UuidStaysUnique_AfterAutoLink()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        // 多个同名文件（各语言目录），确保贪心 1:1 不会把同一个 UUID 用两次
+        TestSupport.WriteTree(v1,
+            ("bin/en/App.resources.dll", TestSupport.Big("EN-1", 8 * 1024)),
+            ("bin/ja/App.resources.dll", TestSupport.Big("JA-1", 8 * 1024)),
+            ("bin/zh/App.resources.dll", TestSupport.Big("ZH-1", 8 * 1024)));
+        TestSupport.WriteTree(v2,
+            ("dotnet/en/App.resources.dll", TestSupport.Big("EN-2", 8 * 1024)),
+            ("dotnet/ja/App.resources.dll", TestSupport.Big("JA-2", 8 * 1024)),
+            ("dotnet/zh/App.resources.dll", TestSupport.Big("ZH-2", 8 * 1024)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.ByNameAndSize);
+
+        Assert.Equal(3, on.AutoLinked.Count);
+        // 一个消失文件只能被用一次 ⇒ 新清单里 UUID 唯一（否则 Manifest 读取时会跳过重复条目）
+        var uuids = on.Manifest.Manifest.Files.Select(f => f.UUID).ToList();
+        Assert.Equal(uuids.Count, uuids.Distinct().Count());
+    }
+
+    [Fact]
+    public void ByNameMode_DoesNotUseTheWeakSizeSignal()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        // 名字完全不同、尺寸一样但**内容不同**（内容相同会被 MD5 规则直接继承成 Moved，这里就测不到了）
+        TestSupport.WriteTree(v1, ("bin/OldName.bin", TestSupport.Big("OLD-CONTENT", 8 * 1024)));
+        TestSupport.WriteTree(v2, ("bin/NewName.bin", TestSupport.Big("NEW-CONTENT", 8 * 1024)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var byName = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.ByName);
+        var full = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.ByNameAndSize);
+
+        Assert.Empty(byName.AutoLinked);                             // 保守模式：不猜
+        var link = Assert.Single(full.AutoLinked);                   // 打开兜底才配
+        Assert.Equal(RenameLinkEvidence.Size, link.Evidence);
+    }
+
+    [Fact]
+    public void SizeWindow_RejectsWildlyDifferentSizes()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        // 名字不同、尺寸差 100 倍 → 不该被硬凑成一对
+        TestSupport.WriteTree(v1, ("bin/Old.bin", TestSupport.Big("OLD", 64 * 1024)));
+        TestSupport.WriteTree(v2, ("bin/New.bin", TestSupport.Big("NEW", 640)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1, autoLink: AutoLinkMode.ByNameAndSize);
+        Assert.Empty(on.AutoLinked);
+    }
+
+    [Fact]
+    public void OffIsTheDefault_SoBehaviourIsUnchanged()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+        TestSupport.WriteTree(v1, ("bin/a.dll", TestSupport.Big("A1", 4096)));
+        TestSupport.WriteTree(v2, ("dotnet/a.dll", TestSupport.Big("A2", 4096)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var on = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);   // 不传 autoLink
+        Assert.Empty(on.AutoLinked);
+    }
+}

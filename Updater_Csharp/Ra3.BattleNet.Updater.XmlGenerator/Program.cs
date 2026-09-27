@@ -19,6 +19,7 @@ internal static class Program
 
         string? oldXml = null, oldRoot = null, targetDir = null, outXml = null, reportPath = null;
         var exclude = new List<string>();
+        var autoLink = AutoLinkMode.Off;
 
         try
         {
@@ -34,6 +35,12 @@ internal static class Program
                     case "--exclude-dirs":
                         exclude.AddRange(Next(args, ref i).Split(',', StringSplitOptions.RemoveEmptyEntries)
                             .Select(d => d.Trim()));
+                        break;
+                    // 自动把"消失 × 新增"里成对的改名接上 UUID（理由与逻辑见 README.md）
+                    case var a when a == "--auto-link-uuids" || a.StartsWith("--auto-link-uuids=", StringComparison.Ordinal):
+                        autoLink = a.Contains("=name", StringComparison.OrdinalIgnoreCase)
+                            ? AutoLinkMode.ByName
+                            : AutoLinkMode.ByNameAndSize;
                         break;
                     case "--debug": Logger.IsDebug = true; break;
                     default:
@@ -56,7 +63,7 @@ internal static class Program
             return -1;
         }
 
-        var result = ManifestGenerator.Generate(targetDir, oldXml, exclude, oldRoot);
+        var result = ManifestGenerator.Generate(targetDir, oldXml, exclude, oldRoot, toolsDir: null, autoLink);
         result.Manifest.SaveToXml(outXml);
 
         var report = ManifestGenerator.FormatReport(result, oldXml, oldRoot);
@@ -89,6 +96,8 @@ internal static class Program
         Console.WriteLine("  --new-xmloutputpath <路径> 必需，本版清单输出路径");
         Console.WriteLine("  --exclude-dirs <列表>      逗号分隔的顶层目录名，其下文件标记为 Mode=Skip");
         Console.WriteLine("  --report <路径>            把自检报告额外写一份到文件");
+        Console.WriteLine("  --auto-link-uuids[=name]   自动把疑似改名成对的 UUID 接上（默认关闭；");
+        Console.WriteLine("                             =name 只用「同名」这个强信号，不带则再加「尺寸接近」兜底）");
         Console.WriteLine("  --help / --debug");
     }
 }
