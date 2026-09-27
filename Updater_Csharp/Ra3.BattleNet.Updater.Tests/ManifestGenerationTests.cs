@@ -85,4 +85,62 @@ public class ManifestGenerationTests
         Assert.Equal(1, gen.Removed.Count);
         Assert.DoesNotContain("➜ 操作", report);   // 无关的新增/消失不该被建议成改名
     }
+
+    /// <summary>
+    /// 5 版本模拟里 v4→v5 是活教材：新打包了一整套 .NET 运行时 →
+    /// 614 新增 × 463 消失。旧实现会把这 28 万对**全部**列进报告（实测 93 MB、85 万行），
+    /// 每一条都在建议人工改 UUID。§5.2 要求"有界"—— 输出侧同样必须有界。
+    /// </summary>
+    [Fact]
+    public void Report_ForHugeAddRemoveSets_StaysBounded_InsteadOfDumpingTheCrossProduct()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        // 300 个消失 × 300 个新增，内容互不相关（模拟"整块内容被替换"而不是改名）
+        TestSupport.WriteTree(v1, Enumerable.Range(0, 300)
+            .Select(i => ($"bin/old{i}.dll", "OLD-" + i + "-" + new string((char)('a' + i % 26), 200))).ToArray());
+        TestSupport.WriteTree(v2, Enumerable.Range(0, 300)
+            .Select(i => ($"dotnet/new{i}.dll", "NEW-" + i + "-" + new string((char)('A' + i % 26), 200))).ToArray());
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        var report = ManifestGenerator.FormatReport(gen, m1, v1);
+
+        Assert.Equal(300, gen.Added.Count);
+        Assert.Equal(300, gen.Removed.Count);
+        Assert.Equal(90_000, gen.ProbeCandidates);
+        Assert.Equal(ManifestGenerator.MaxProbePairs, gen.ProbedPairs);   // 探测次数被钉死
+        Assert.True(report.Length < 4_000, $"报告不该随笛卡尔积膨胀，实得 {report.Length} 字符");
+        Assert.DoesNotContain("补丁率 ?", report);                        // 不许出现"没算就列出来"
+        Assert.Contains("候选 90000 对", report);
+    }
+
+    /// <summary>一个消失文件只能是一个新增文件的"疑似前身"（UUID 在清单里唯一）。</summary>
+    [Fact]
+    public void Report_DoesNotSuggestTheSameRemovedFileForTwoAddedFiles()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+
+        TestSupport.WriteTree(v1, ("bin/one.dll", TestSupport.Big("RENAMED", 8192)));
+        TestSupport.WriteTree(v2,
+            ("bin/a.dll", TestSupport.Big("RENAMED-A", 8192)),
+            ("bin/b.dll", TestSupport.Big("RENAMED-B", 8192)));
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+
+        var gen = ManifestGenerator.Generate(v2, m1, [], oldRoot: v1);
+        var report = ManifestGenerator.FormatReport(gen, m1, v1);
+
+        Assert.Equal(2, gen.Added.Count);
+        Assert.Equal(1, gen.Removed.Count);
+        Assert.Single(gen.SuspectRenames);                     // 只配一次，不许一旧配两新
+        Assert.Equal(1, report.Split("➜ 操作").Length - 1);
+    }
 }
