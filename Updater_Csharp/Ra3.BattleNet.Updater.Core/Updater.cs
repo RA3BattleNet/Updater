@@ -54,8 +54,13 @@ public sealed class Updater
         }
     }
 
-    private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
+    private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken externalCt)
     {
+        // 整体时限（§4.6）：管住"每个请求都没超时、但整轮永远跑不完"的情况。
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
+        session.CancelAfter(_cfg.SessionTimeout);
+        var ct = session.Token;
+
         var sw = Stopwatch.StartNew();
         var tally = new Tally();
 
@@ -65,7 +70,8 @@ public sealed class Updater
         WriteCacheNotice(cacheDir);
 
         using var log = new UpdateLog(_cfg.ResolveLogPath(),
-            $"{DateTime.UtcNow:yyyyMMddTHHmmss}-{Environment.ProcessId}");
+            $"{DateTime.UtcNow:yyyyMMddTHHmmss}-{Environment.ProcessId}",
+            _cfg.MaxLogBytes);
 
         var etagPath = Path.Combine(cacheDir, "manifest.etag");
         var remotePath = Path.Combine(cacheDir, "manifest.remote.xml");
@@ -214,33 +220,47 @@ public sealed class Updater
             progress?.Report(new UpdateProgress(n, totalWork, entry.Target.FileName, ActionName(action)));
         }
 
-        // 自适应并发（§4.6）：起始 2；一批全成功就 +1 到上限，本批出现失败就回退一步。
+        // 自适应并发（§4.6）：起始 2，成功就 +1 到上限，出现失败就回退一步。
         // 面对受限源站时，这比固定高并发克制得多。
-        var maxConcurrency = Math.Max(UpdateConfig.StartConcurrency, _cfg.MaxConcurrency);
+        //
+        // 调度用「连续流水线」而不是「一批一等」：始终把在飞文件数填到 target，
+        // 每完成一个就补位。批等（Task.WhenAll(wave)）会被一批里最慢的那个文件拖住，
+        // 481 个补丁就是几百个空转的栅栏。这里没有栅栏。
+        // 起点不高于上限：MaxConcurrency=1 就真的是 1（把上限也抬到起始值会让"限制并发"配置失效）。
+        var maxConcurrency = Math.Max(1, _cfg.MaxConcurrency);
         var target = Math.Min(UpdateConfig.StartConcurrency, maxConcurrency);
-        var cursor = 0;
+        var queue = new Queue<PlanEntry>(pending);
+        var inFlight = new List<Task>();
+        var failuresSeen = 0;
 
         try
         {
-            while (cursor < pending.Count)
+            while (queue.Count > 0 || inFlight.Count > 0)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var wave = pending.GetRange(cursor, Math.Min(target, pending.Count - cursor));
-                cursor += wave.Count;
+                while (queue.Count > 0 && inFlight.Count < target)
+                    inFlight.Add(ProcessOneAsync(queue.Dequeue()));
 
-                var failuresBefore = Volatile.Read(ref tally.Fail);
-                await Task.WhenAll(wave.Select(ProcessOneAsync)).ConfigureAwait(false);
-                var failedInWave = Volatile.Read(ref tally.Fail) - failuresBefore;
+                if (inFlight.Count == 0) break;
 
-                target = failedInWave > 0
+                var finished = await Task.WhenAny(inFlight).ConfigureAwait(false);
+                inFlight.Remove(finished);
+                await finished.ConfigureAwait(false);
+
+                var failures = Volatile.Read(ref tally.Fail);
+                target = failures > failuresSeen
                     ? Math.Max(UpdateConfig.StartConcurrency, target - 1)
                     : Math.Min(maxConcurrency, target + 1);
+                failuresSeen = failures;
             }
         }
         catch (OperationCanceledException)
         {
-            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.IoError, "已取消");
+            var detail = externalCt.IsCancellationRequested
+                ? "已取消"
+                : $"超出整体时限（{_cfg.SessionTimeout}）";
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.IoError, detail);
         }
 
         if (tally.Fail == 0)
@@ -319,13 +339,16 @@ public sealed class Updater
         var outPath = patchPath + ".out";
         Fs.Delete(outPath);
 
-        if (!HdiffTool.Apply(_cfg.ResolveToolsDir(), entry.PredecessorPath, patchPath, outPath, out _))
+        if (!await HdiffTool.ApplyAsync(_cfg.ResolveToolsDir(), entry.PredecessorPath, patchPath, outPath, ct)
+                .ConfigureAwait(false))
         {
             Fs.Delete(patchPath);
             return (false, UpdateReasons.PatchFailed, bytes);
         }
 
-        if (!string.Equals(Hashing.Md5File(outPath), entry.Target.MD5, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(
+                await Hashing.Md5FileAsync(outPath, ct).ConfigureAwait(false),
+                entry.Target.MD5, StringComparison.OrdinalIgnoreCase))
         {
             Fs.Delete(outPath);
             Fs.Delete(patchPath);
@@ -348,7 +371,9 @@ public sealed class Updater
         try
         {
             var blobOk = Fs.Exists(blob)
-                && string.Equals(Hashing.Md5File(blob), entry.Target.MD5, StringComparison.OrdinalIgnoreCase);
+                && string.Equals(
+                    await Hashing.Md5FileAsync(blob, ct).ConfigureAwait(false),
+                    entry.Target.MD5, StringComparison.OrdinalIgnoreCase);
 
             if (!blobOk)
             {

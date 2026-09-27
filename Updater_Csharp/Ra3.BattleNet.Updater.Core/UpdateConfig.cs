@@ -63,6 +63,18 @@ public sealed record UpdateConfig
     public string? LogPath { get; init; }
 
     /// <summary>
+    /// 日志超过该字节数就在下一次运行时轮转成 <c>update.log.1</c>（只留一代）。
+    /// 默认 8 MB；0 = 不轮转。见 AGENT.md §4.11。
+    /// </summary>
+    public long MaxLogBytes { get; init; } = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// 单个会话的**整体时限**（AGENT.md §4.6「整体有时限」）。默认 2 小时。
+    /// 它是最后一道保险：单请求超时管不住"每次都刚好没超时、但总也跑不完"的情况。
+    /// </summary>
+    public TimeSpan SessionTimeout { get; init; } = TimeSpan.FromHours(2);
+
+    /// <summary>
     /// 是否对「判定为无需更新」的文件重新计算哈希。
     /// 慢（要读全量文件），但能发现本地被篡改/损坏；默认关闭（AGENT.md §4.5）。
     /// </summary>

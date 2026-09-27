@@ -73,4 +73,15 @@ internal static class Hashing
         using var s = Fs.OpenRead(path);
         return Convert.ToHexStringLower(MD5.HashData(s));
     }
+
+    /// <summary>
+    /// 异步文件哈希：客户端每个文件的校验都在并发路径上，
+    /// 用同步读会白占线程池线程（AGENT.md §4.6 并发模型）。
+    /// </summary>
+    public static async Task<string> Md5FileAsync(string path, CancellationToken ct)
+    {
+        await using var s = Fs.OpenRead(path);
+        var hash = await MD5.HashDataAsync(s, ct).ConfigureAwait(false);
+        return Convert.ToHexStringLower(hash);
+    }
 }

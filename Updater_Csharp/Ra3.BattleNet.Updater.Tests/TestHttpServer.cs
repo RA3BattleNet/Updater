@@ -19,6 +19,10 @@ internal sealed class TestHttpServer : IDisposable
     private int _requests;
     private int _notFound;
     private int _notModified;
+    private readonly List<string> _paths = [];
+    private readonly Lock _pathsLock = new();
+    private int _inFlight;
+    private int _peakInFlight;
 
     public string BaseUrl { get; }
 
@@ -27,6 +31,25 @@ internal sealed class TestHttpServer : IDisposable
     public int NotFound => Volatile.Read(ref _notFound);
 
     public int NotModified => Volatile.Read(ref _notModified);
+
+    /// <summary>按到达顺序记录所有请求的 URL 路径（§3.3 寻址规则的断言依据）。</summary>
+    public IReadOnlyList<string> RequestPaths
+    {
+        get { lock (_pathsLock) return _paths.ToList(); }
+    }
+
+    /// <summary>
+    /// 「同时在处理中的（被人为延迟的）请求」的历史峰值。
+    /// 只在 <see cref="ArtificialDelayMs"/> 窗口内计数：这样串行客户端**不可能**凑出峰值 2
+    /// （它必须先收完上一个响应才会发下一个），并发客户端才凑得出。
+    /// 用来证明客户端不是线性跑文件的。
+    /// </summary>
+    public int PeakInFlight => Volatile.Read(ref _peakInFlight);
+
+    public void ResetPeak() => Volatile.Write(ref _peakInFlight, 0);
+
+    /// <summary>&gt;0 时每个响应前先睡这么久，便于把并发度放大成可观测的时间差。</summary>
+    public int ArtificialDelayMs { get; set; }
 
     /// <summary>最近一次请求的 Accept-Encoding，用于验证客户端确实开启了透明压缩。</summary>
     public string? LastAcceptEncoding { get; private set; }
@@ -66,6 +89,20 @@ internal sealed class TestHttpServer : IDisposable
 
     private void Handle(TcpClient client)
     {
+        HandleCore(client);
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int seen;
+        while ((seen = Volatile.Read(ref target)) < value
+               && Interlocked.CompareExchange(ref target, value, seen) != seen)
+        {
+        }
+    }
+
+    private void HandleCore(TcpClient client)
+    {
         using (client)
         using (var stream = client.GetStream())
         {
@@ -91,6 +128,17 @@ internal sealed class TestHttpServer : IDisposable
             var parts = requestLine.Split(' ');
             var urlPath = parts.Length > 1 ? parts[1] : "/";
             Interlocked.Increment(ref _requests);
+            lock (_pathsLock) _paths.Add(urlPath);
+
+            // 人为延迟放在「读请求之后、写响应之前」：并发度会直接体现为时间差与重叠峰值。
+            // 计数窗口只包住延迟本身，串行客户端因此不可能出现峰值 2。
+            if (ArtificialDelayMs > 0)
+            {
+                var n = Interlocked.Increment(ref _inFlight);
+                InterlockedMax(ref _peakInFlight, n);
+                Thread.Sleep(ArtificialDelayMs);
+                Interlocked.Decrement(ref _inFlight);
+            }
 
             var file = ResolveFile(urlPath);
             if (file is null)
