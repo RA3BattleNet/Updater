@@ -18,7 +18,9 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
   --threshold-files <N>     待下载文件数阈值（默认 0 = 关闭）
   --threshold-ratio <R>     待下载文件数占比阈值（默认 0 = 关闭）
   --apply-mode <模式>       inplace（默认，就地替换）或 staged（只暂存，宿主退出后由 applier 落地）
-  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）
+  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）。
+                            开了它会**跳过"已最新"的捷径**：即使清单没变也逐文件核对磁盘，
+                            坏掉的资源会被重新下载 —— 宿主"修复资源"按钮用这个
   --json                    只输出一行 JSON 结果
 
 暂存更新的落地（宿主退出后跑；库不自己 spawn 进程）：

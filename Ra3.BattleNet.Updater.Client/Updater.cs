@@ -131,18 +131,47 @@ public sealed class Updater
         if (!manifest.Ok)
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, manifest.Reason, manifest.HttpVersion ?? string.Empty);
 
+        // 304 只说"远端清单没变"，**不说明"我的树就是那一版"**。
+        // 降级/覆盖安装、还原备份都会让本地清单落后于 ETag 对应的版本；而缓存默认在安装根之外时，
+        // 重装/还原并不会清掉它 —— 旧代码在这里直接返回 UpToDate，于是**永久静默地不再更新**。
+        // 所以命中 304 也必须拿缓存里的远端清单，再核一次本地状态。
+        byte[] remoteBytes;
         if (manifest.NotModified)
-            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
+        {
+            if (Fs.Exists(remotePath))
+            {
+                remoteBytes = Fs.ReadAllBytes(remotePath);        // 零网络：远端清单就在缓存里
+            }
+            else
+            {
+                // 缓存里没有远端清单（被删 / 缓存不全）→ 304 不可信，无条件重取一次（只有清单）
+                manifest = await fetcher.GetManifestAsync(_cfg.ManifestUrl, null, ct);
+                if (!manifest.Ok)
+                    return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, manifest.Reason, manifest.HttpVersion ?? string.Empty);
+                if (manifest.NotModified)
+                    return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable,
+                        "服务端对无条件请求仍返回 304：无法判断本地是否落后于远端", manifest.HttpVersion ?? string.Empty);
+                remoteBytes = manifest.Content!;
+                Fs.WriteAllBytes(remotePath, remoteBytes);
+            }
+        }
+        else
+        {
+            remoteBytes = manifest.Content!;
+            Fs.WriteAllBytes(remotePath, remoteBytes);
+        }
 
-        var remoteBytes = manifest.Content!;
         var remoteHash = Hashing.Md5(remoteBytes);
         tally.ManifestHash = remoteHash;
-        Fs.WriteAllBytes(remotePath, remoteBytes);
 
         // ETag 只能在「本地清单确实等于远端清单」之后才写：
         // 它表达的是"我的本地状态对应哪一版远端清单"。提前写会让下一次运行
         // 凭 If-None-Match 拿到 304，从而误判"已最新"（而本地其实还没更新）。
-        if (localHash is not null && string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
+        // `--verify-unchanged` 例外：开了它就**不许**走这条捷径 —— 那条路的意义就是逐文件核对磁盘，
+        // 否则宿主的"修复资源"按钮在"本来已最新"这个主场景下会空转、却报成功。
+        if (localHash is not null
+            && string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase)
+            && !_cfg.VerifyUnchangedFiles)
         {
             SaveEtag(etagPath, manifest.ETag);
             return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
