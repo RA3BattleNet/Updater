@@ -12,7 +12,7 @@
   §2.5 配置项 · §2.6 日志（格式是契约）· §2.7 独立进程壳（宿主不是 C# 时）·
   **§2.8 宿主集成：两条落地路线与「退出后转交 applier」**（含不支持的场景 / 宿主的义务 / 可选代重启）
 - 发布侧：§3 服务端流水线 · §4 协议与清单格式
-- 上手：§5 本地跑一遍 · §6 测试 · §7 部署与 CDN 要求 · §8 已移除的历史链路（只留记录）
+- 上手：§5 本地跑一遍 · §6 测试 · §7 部署与 CDN 要求
 
 > **先看这五条，能省很多时间**（详情都在 §2.8）：
 > ① 要替换**宿主自己的**文件 → `ApplyMode.Staged`，并在宿主退出**之前**把 applier 挂起来；
@@ -350,7 +350,7 @@ rclone copyto <服务端目录>/manifest.xml <远端>/manifest.xml
 </Metadata>
 ```
 
-> **文件级 `Version` / `Type` / `KindOf` 已剔除（2026-09-28）**：三者都没有判断价值
+> **文件级 `Version` / `Type` / `KindOf` 已剔除**：三者都没有判断价值
 > （客户端从不读、生成器只是搬运；官方清单实测 `Type` 恒为 `Bin`、`KindOf` 恒为 `NULL`、
 > 文件级 `Version` 只有 3 个"哪次生成器跑出来的"残留值）。清单**根节点**的 `Version`
 > （格式版本，属性形式）保留，`Mode` 保留。
@@ -409,6 +409,17 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 > `Process.GetProcessHandle` 被拒而崩溃。测试本身是标准 xUnit `[Fact]`，
 > 正常机器上 `dotnet test Ra3.BattleNet.sln` 照常可用。
 
+### 6.1 交付前必做：用**干净 clone** 构建一次
+
+只看工作区构建**不够** —— `.gitignore` 可能把源码文件一起忽略掉（本仓库就中过：
+`.gitignore` 的 `[Ll]og/` 规则吞掉了 `Share/Log/Logger.cs`），此时本机全绿、干净 clone 编译不过。
+
+```powershell
+Remove-Item H:\TEST\freshclone -Recurse -Force -ErrorAction SilentlyContinue
+git clone --no-hardlinks . H:\TEST\freshclone
+dotnet build H:\TEST\freshclone\Ra3.BattleNet.sln -c Release
+```
+
 ## 7. 部署与 CDN 要求（当前结论）
 
 | 项 | 要求 |
@@ -419,39 +430,3 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 | 单文件缓存上限 | CF 的 Free/Pro/Business 为 **512 MB**（Enterprise 5 GB）；超出的对象永远回源 → GB 级文件按"不可缓存"设计 |
 | 外部工具 | `hdiffpatch_bin` **必须带与宿主 RID 匹配的那一份**：`HdiffTool.Rid` = 当前**进程**架构（32 位宿主 → `win-x86`）。随包覆盖 win-x64 / win-x86 / linux-x64 |
 | 缺工具时 | **计划阶段就降级**：`hpatchz` 找不到 → 所有补丁直接计划成完整下载，`reason=patch_tool_missing`，`UpdateResult.Detail` 说明原因。绝不会"先下一份补丁再回落"（那比纯完整下载还费流量） |
-
-## 8. 已移除的历史链路（只留记录，代码与样例已删）
-
-### 8.1 离线补丁包（一次性 A→B 对比）—— **已删除（2026-09-28）**
-
-原来是 `Server.CLI`（`--old-manifest/--new-manifest/--old-base/--new-base/--output`）生成一个自包含目录
-（`patch-manifest.json` + `files/` + `patches/`），`Client.CLI`（`--patch/--target`）在**离线**环境把它打上。
-它与在线增量流程**零耦合**，且只被自己的测试使用，所以整条删掉：
-
-`Server/API.cs`、`Client` 项目、`Server.CLI`、`Client.CLI`、`Share/Models/PatchModel.cs`、
-`Share/Utilities/{PatchApplyer,PatchGenerater,PublicMethod}.cs`、`example/` 样例目录、`Tests/PatchPackageTests.cs`。
-
-> 顺带删掉的两个字段：`PatchManifest.BaseVersion` / `TargetVersion` —— 它们**写而不读**
-> （生成端填的是清单根版本、恒 `1.0.0`；应用端只遍历 `Operations`）。
-
-### 8.2 更早的 SQLite + `patches.json` 索引链路 —— 更早已取代
-
-`Server.PatchIndexGenerator`（SQLite + `patches.json` 索引）与 `Client.PatchIndexApplyer` 已被
-`Server.PatchGenerator` 与 `Client.CLI` 取代：现在**没有索引文件**，补丁按内容对直接寻址。
-
-### 8.3 HDiffPatch 选型对比（当年数据，供参考）
-
-| 内容对 | 大小 | bsdiff | deltaq | xdelta3 | hdiffpatch |
-|---|---|---|---|---|---|
-| `EnhancerCorona.dll` 新旧 | 3.3M → 3.3M | **483K** | 483K | 576–632K | 921K |
-| ubuntu live-server ISO 相邻版本 | 1.2G → 1.2G | 耗时过长 | 耗时过长 | 1.1G | **695M** |
-| `amdvlk32.dll` → `amdvlk64.dll` | 102M → 115M | **23M** | 23M | 24M | 63M |
-
-> **⚠️ 上表是早期数据（参数不当时测的），别照它下结论。** 当时用 `-s` 流式且**没有加压缩**
-> （`-c-…` 默认是 **uncompress**），所以 HDiffPatch 的补丁明显偏大 —— HDiffPatch 作者本人
-> 就是看到这张表来提 issue 的。现在实现的参数是 `-m`（内存够时，否则 `-s`）+ `-c-lzma`，
-> 同一批内容对实测从 69.7% 降到 21.5%（约 3.2 倍）；当前参数下的实测与复核见
-> `Server.PatchGenerator/README.md`。
-
-结论：小文件 bsdiff 更小，大文件 hdiffpatch 明显更优；本项目统一用 **hdiffz/hpatchz**，
-参数为 `-m`（内存够时）否则 `-s`（流式），统一 `-c-lzma`。
