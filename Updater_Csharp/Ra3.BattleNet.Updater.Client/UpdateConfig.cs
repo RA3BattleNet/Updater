@@ -12,6 +12,18 @@ public sealed record UpdateConfig
     public required string RootPath { get; init; }
 
     /// <summary>
+    /// applier 要等的宿主进程号（null = 不等待特定进程）。由 CLI 的 --wait-for-pid 设置；
+    /// 与"树内进程名扫描"一起构成静默判据（AGENT.md §12.5）。
+    /// </summary>
+    public int? WaitForProcessId { get; init; }
+
+    /// <summary>applier 等待"树静默"的总时限（§12.5）：超时即整轮不落地，什么都不动。</summary>
+    public TimeSpan ApplierQuiescenceTimeout { get; init; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>applier 的静默轮询间隔。默认 2 秒（实测：按名字扫描约 4.5ms/次）。</summary>
+    public TimeSpan ApplierPollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// 落地模式（AGENT.md §12.1）。默认 <see cref="ApplyMode.InPlace"/>：
     /// 会话内就地替换，全部成功即生效。选 <see cref="ApplyMode.Staged"/> 时只暂存到
     /// <c>UpdaterStage</c>，由独立 applier 在宿主退出后落地 —— 自更新必须走这条路。

@@ -99,12 +99,21 @@ public static class StageLayout
         }
     }
 
+    /// <summary>删掉暂存内容（落地成功、内容已被消费完之后）。</summary>
+    public static void ClearNew(string installRoot) => DeleteTree(NewRoot(installRoot));
+
+    /// <summary>删掉备份（回退窗口止于"下一次落地开始"，§12.7）。</summary>
+    public static void ClearOld(string installRoot) => DeleteTree(OldRoot(installRoot));
+
+    /// <summary>删掉待提交计划（落地成功、本地清单已推进之后）。</summary>
+    public static void DeletePlan(string installRoot) => Fs.Delete(PlanPath(installRoot));
+
     /// <summary>清空整个暂存区（换目标版本、或宿主显式放弃待提交更新时用）。</summary>
     public static void Reset(string installRoot)
     {
-        DeleteTree(NewRoot(installRoot));
-        DeleteTree(OldRoot(installRoot));
-        Fs.Delete(PlanPath(installRoot));
+        ClearNew(installRoot);
+        ClearOld(installRoot);
+        DeletePlan(installRoot);
     }
 
     /// <summary>删掉 <c>new/</c> 里不在计划内的残留（上次半途失败留下的、已不再需要的暂存内容）。</summary>

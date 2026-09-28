@@ -141,6 +141,15 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
 退出码：`0` 已最新或已更新 ｜ `3` 已暂存待落地（暂存模式）｜ `1` 需要完整包 / 失败 ｜ `2` 参数或配置错误。
 加 `--json` 只输出一行结构化结果（字段同 §2.3，另含 `Ms`）。
 
+暂存更新（`--apply-mode staged`）模式下，**落地由另一次 `--apply` 调用完成**（宿主退出后跑；
+库不自己 spawn 进程，见 AGENT.md §12.5）：
+
+```
+Client.CLI --apply --root <安装目录> --manifest-url <清单地址> [--wait-for-pid <宿主PID>] [--quiescence-timeout 600] [--poll-seconds 2] [--json]
+```
+
+退出码 `0` = 已落地。宿主可以直接用 `StagedApplier.BuildApplyCommand(exe, cfg)` 生成这条命令。
+
 ## 3. 服务端（发布流水线）
 
 三步，**必须按版本顺序链式生成**（否则 UUID 链断裂 → 补丁全部落空且不报错）：

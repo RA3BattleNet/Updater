@@ -101,4 +101,13 @@ public static class UpdateReasons
     /// 必须拒绝：否则随后运行的 applier 会拿旧计划覆盖刚由直接模式换好的新文件。
     /// </summary>
     public const string PendingStagedApply = "pending_staged_apply";
+
+    /// <summary>远端清单已变，待提交计划对应的版本不是当前远端版本（§12.5）：本轮不落地，等下一次更新重新规划。</summary>
+    public const string StagedPlanStale = "staged_plan_stale";
+
+    /// <summary>暂存内容缺失或哈希不符：**整体不落地**（也不写本地清单），等下一次更新补齐。</summary>
+    public const string StagedContentMissing = "staged_content_missing";
+
+    /// <summary>等到时限仍有进程在使用这棵树（§12.5 的静默判据）：本轮不落地，什么都不动。</summary>
+    public const string TreeBusy = "tree_busy";
 }

@@ -6,7 +6,7 @@ namespace Ra3.BattleNet.Updater.Client.CLI;
 
 /// <summary>
 /// 独立进程壳：跑一次更新并给出结构化结果（AGENT.md §4.12）。
-/// 退出码：0 = 已最新或已更新；3 = 已暂存待落地（暂存模式，宿主退出后生效）；1 = 需要完整包 / 失败；2 = 参数或配置错误。
+/// 退出码：0 = 已最新 / 已更新 / 已落地；3 = 已暂存待落地（暂存模式，宿主退出后生效）；1 = 需要完整包 / 失败；2 = 参数或配置错误。
 /// 原因另以一行 JSON 输出到 stdout。
 /// </summary>
 internal static class Program
@@ -15,6 +15,7 @@ internal static class Program
     {
         UpdateConfig config;
         var json = args.Contains("--json");
+        var apply = args.Contains("--apply");
 
         try
         {
@@ -36,7 +37,9 @@ internal static class Program
         UpdateResult result;
         try
         {
-            result = new ClientUpdater(config).Run(progress);
+            result = apply
+                ? new StagedApplier(config).Run(progress)
+                : new ClientUpdater(config).Run(progress);
         }
         catch (Exception ex)
         {
@@ -86,6 +89,9 @@ internal static class Program
         var concurrency = 4;
         var verifyUnchanged = false;
         var applyMode = ApplyMode.InPlace;
+        int? waitForPid = null;
+        var quiescenceSeconds = 600;
+        var pollSeconds = 2;
         // 保险丝默认**关闭**（AGENT.md §4.4 / Q4）：变更文件多正是增量该发挥作用的场景。
         // 这里原来是 500 / 0.30 —— 等于默认开启，会让"变更文件多"直接被判成需要完整包。
         var thresholdFiles = 0;
@@ -108,6 +114,10 @@ internal static class Program
                 case "--threshold-ratio": thresholdRatio = double.Parse(Next(args, ref i)); break;
                 case "--verify-unchanged": verifyUnchanged = true; break;
                 case "--apply-mode": applyMode = ParseApplyMode(Next(args, ref i)); break;
+                case "--apply": break;
+                case "--wait-for-pid": waitForPid = int.Parse(Next(args, ref i)); break;
+                case "--quiescence-timeout": quiescenceSeconds = int.Parse(Next(args, ref i)); break;
+                case "--poll-seconds": pollSeconds = int.Parse(Next(args, ref i)); break;
                 case "--json": break;
                 case "--help": ShowUsage(); Environment.Exit(0); break;
                 default: throw new ArgumentException($"未知参数：{args[i]}");
@@ -132,6 +142,9 @@ internal static class Program
             FullPackageThresholdRatio = thresholdRatio,
             VerifyUnchangedFiles = verifyUnchanged,
             ApplyMode = applyMode,
+            WaitForProcessId = waitForPid,
+            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(Math.Max(1, quiescenceSeconds)),
+            ApplierPollInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds)),
         };
     }
 
@@ -167,5 +180,11 @@ internal static class Program
         Console.WriteLine("  --apply-mode <模式>       inplace（默认，就地替换）或 staged（只暂存，宿主退出后由 applier 落地）");
         Console.WriteLine("  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）");
         Console.WriteLine("  --json                    只输出一行 JSON 结果");
+        Console.WriteLine();
+        Console.WriteLine("暂存更新的落地（宿主退出后跑；库不自己 spawn 进程，见 AGENT.md §12.5）：");
+        Console.WriteLine("  --apply                   只做落地：把 UpdaterStage 里已就绪的内容换上去");
+        Console.WriteLine("  --wait-for-pid <PID>      --apply 时先等这个进程退出（宿主把自己的 PID 传进来）");
+        Console.WriteLine("  --quiescence-timeout <秒> --apply 时等树静的时限（默认 600）");
+        Console.WriteLine("  --poll-seconds <秒>       --apply 时的轮询间隔（默认 2）");
     }
 }
