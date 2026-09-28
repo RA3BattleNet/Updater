@@ -260,6 +260,82 @@ public class StagedApplierTests
     // ============================================================ 静默判据
 
     [Fact]
+    public void Apply_WhenThePidWasRecycledToAnotherProcess_DoesNotWaitForIt()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        // 拿本测试进程当"抢到同一个 PID 的无关进程"：PID 活着，但身份对不上 → 不许等它
+        var cfg = Cfg(e) with
+        {
+            WaitForProcessId = Environment.ProcessId,
+            WaitForProcessName = "definitely-not-this-process",
+            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(5),
+        };
+
+        var applied = new StagedApplier(cfg).Run();
+
+        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);   // 没有白等到超时
+        AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);
+    }
+
+    [Fact]
+    public void Apply_WhenSameNameButADifferentStartTime_DoesNotWaitForIt()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        // 名字也相同（例如用户又双击了一次同名启动器）—— 启动时刻对不上就一定是别的进程
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        var cfg = Cfg(e) with
+        {
+            WaitForProcessId = self.Id,
+            WaitForProcessName = self.ProcessName,
+            WaitForProcessStartTicks = self.StartTime.Ticks - TimeSpan.TicksPerSecond,
+            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(5),
+        };
+
+        var applied = new StagedApplier(cfg).Run();
+
+        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
+        AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);
+    }
+
+    [Fact]
+    public void Apply_WhenTheHostIdentityStillMatches_KeepsWaitingThenRefuses()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        // 三元组完全吻合 = 就是宿主本人且它没退 → 必须一直等，最后以 tree_busy 收场、一个文件都不动
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        var cfg = Cfg(e) with
+        {
+            WaitForProcessId = self.Id,
+            WaitForProcessName = self.ProcessName,
+            WaitForProcessStartTicks = self.StartTime.Ticks,
+            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(3),
+            ApplierPollInterval = TimeSpan.FromMilliseconds(200),
+        };
+
+        var result = new StagedApplier(cfg).Run();
+
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+        Assert.Equal(UpdateReasons.TreeBusy, result.Reason);
+        AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);
+        Assert.True(StageLayout.HasPendingPlan(e.Client));       // 计划原样留着，下次再来
+    }
+
+    [Fact]
     public void Apply_WaitsForAProcessRunningFromTheTree_ThenLandsAfterItExits()
     {
         const string ping = @"C:\Windows\System32\ping.exe";

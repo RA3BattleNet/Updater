@@ -208,7 +208,22 @@ public sealed class StagedApplier
         try
         {
             using var p = Process.GetProcessById(pid);
-            return p.HasExited;
+            if (p.HasExited) return true;
+
+            // PID 会被系统复用：只认 PID 会把"抢到同一个 PID 的无关进程"当成宿主还在，白等到超时。
+            // 所以还要比对宿主自己交下来的身份 —— 名字挡掉绝大多数；**启动时刻**才是唯一实例标识，
+            // 连"用户又启动了一次同名程序"也挡得住。两个值由 BuildApplyCommand 自动填，宿主不用管。
+            if (_cfg.WaitForProcessName is { Length: > 0 } hostName &&
+                !string.Equals(p.ProcessName, hostName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (_cfg.WaitForProcessStartTicks is { } hostTicks)
+            {
+                try { if (p.StartTime.Ticks != hostTicks) return true; }
+                catch { /* 读不到启动时刻（权限）：名字已经比过了，就认为它还是宿主 */ }
+            }
+
+            return false;
         }
         catch
         {
@@ -401,6 +416,8 @@ public sealed class StagedApplier
                      ("--tools-dir", cfg.ToolsDir),
                      ("--log", cfg.LogPath),
                      ("--wait-for-pid", Environment.ProcessId.ToString()),
+                     ("--wait-for-name", SelfProcessName()),
+                     ("--wait-for-start", SelfStartTicks()),
                      ("--quiescence-timeout", ((int)cfg.ApplierQuiescenceTimeout.TotalSeconds).ToString()),
                  })
         {
@@ -410,6 +427,19 @@ public sealed class StagedApplier
         }
 
         return psi;
+    }
+
+    // 「我是谁」由宿主这一侧填好交下去 —— PID 会被复用，光凭 PID 认不准（见 HostExited）。
+    private static string? SelfProcessName()
+    {
+        try { using var p = Process.GetCurrentProcess(); return p.ProcessName; }
+        catch { return null; }
+    }
+
+    private static string? SelfStartTicks()
+    {
+        try { using var p = Process.GetCurrentProcess(); return p.StartTime.Ticks.ToString(); }
+        catch { return null; }
     }
 
     // ------------------------------------------------------------------ 小工具

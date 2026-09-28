@@ -17,6 +17,20 @@ public sealed record UpdateConfig
     /// </summary>
     public int? WaitForProcessId { get; init; }
 
+    /// <summary>
+    /// 宿主进程名（不含 .exe）。与 <see cref="WaitForProcessId"/> 一起校验：
+    /// **PID 会被系统复用**，光看 PID 会把"抢到同一个 PID 的无关进程"当成宿主还在，白等到超时。
+    /// 由 <c>StagedApplier.BuildApplyCommand</c> 自动填 —— 宿主不用管。
+    /// </summary>
+    public string? WaitForProcessName { get; init; }
+
+    /// <summary>
+    /// 宿主进程的启动时刻（<c>Process.StartTime.Ticks</c>）。它才是**唯一**的实例标识：
+    /// 同 PID + 同名字仍可能是"用户又启动了一次同名程序"（例如又双击了一次启动器），
+    /// 启动时刻对不上就一定不是同一个进程。同样由 BuildApplyCommand 自动填。
+    /// </summary>
+    public long? WaitForProcessStartTicks { get; init; }
+
     /// <summary>applier 等待"树静默"的总时限（§12.5）：超时即整轮不落地，什么都不动。</summary>
     public TimeSpan ApplierQuiescenceTimeout { get; init; } = TimeSpan.FromMinutes(10);
 

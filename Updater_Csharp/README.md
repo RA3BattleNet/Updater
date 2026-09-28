@@ -149,6 +149,9 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
 ```
 Client.CLI --apply --root <安装目录> --manifest-url <清单地址> [--wait-for-pid <宿主PID>] [--quiescence-timeout 600] [--poll-seconds 2] [--json]
 ```
+`--wait-for-pid` 认宿主时连**进程名与启动时刻**一起比（`--wait-for-name` / `--wait-for-start`）——
+PID 会被系统复用，只认 PID 可能把"抢到同一个 PID 的无关进程"当成宿主还在，白等到超时。
+后两个参数由 `BuildApplyCommand` **自动填**，宿主不用管。
 
 退出码 `0` = 已落地。宿主可以直接用 `StagedApplier.BuildApplyCommand(exe, cfg)` 生成这条命令。
 
@@ -218,6 +221,7 @@ if (r.PendingRestart)
 9. **回退窗口**：落地后 `old/` 留着上一版备份，到**下一轮暂存开始时**（且上次已落地）自动清掉。
 10. **applier 不负责重启宿主**：落地完成后没有任何人会把程序拉起来 —— 那是宿主的责任（外层启动器 / 计划任务 / 让用户再点一次）。要 applier 代劳得另加开关。
 11. **启动 applier 之后就不要再开更新会话**：applier 一启动就持有更新锁，再跑一次会得到 `already_running`。
+12. **`ApplierQuiescenceTimeout` 从"applier 进入等待"开始算**（不是从宿主死亡、也不是从被创建的那一毫秒），所以这 10 分钟要同时覆盖「宿主从挂上它到真正消失」+「树里其它进程退干净」。**最佳时机是关闭序列的最后一刻**（用户交互都做完、状态存完、真正退出之前）—— 挂太早，用户在"确定要退出吗"上犹豫久了，applier 会等到超时判 `tree_busy`（树没动，下次再来，不是损坏）。
 
 ## 3. 服务端（发布流水线）
 

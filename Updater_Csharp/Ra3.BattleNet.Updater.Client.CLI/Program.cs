@@ -66,6 +66,8 @@ internal static class Program
         var verifyUnchanged = false;
         var applyMode = ApplyMode.InPlace;
         int? waitForPid = null;
+        string? waitForName = null;
+        long? waitForStart = null;
         var quiescenceSeconds = 600;
         var pollSeconds = 2;
         // 保险丝默认**关闭**（AGENT.md §4.4 / Q4）：变更文件多正是增量该发挥作用的场景。
@@ -92,6 +94,8 @@ internal static class Program
                 case "--apply-mode": applyMode = ParseApplyMode(Next(args, ref i)); break;
                 case "--apply": break;
                 case "--wait-for-pid": waitForPid = int.Parse(Next(args, ref i)); break;
+                case "--wait-for-name": waitForName = Next(args, ref i); break;
+                case "--wait-for-start": waitForStart = long.Parse(Next(args, ref i)); break;
                 case "--quiescence-timeout": quiescenceSeconds = int.Parse(Next(args, ref i)); break;
                 case "--poll-seconds": pollSeconds = int.Parse(Next(args, ref i)); break;
                 case "--json": break;
@@ -119,6 +123,8 @@ internal static class Program
             VerifyUnchangedFiles = verifyUnchanged,
             ApplyMode = applyMode,
             WaitForProcessId = waitForPid,
+            WaitForProcessName = waitForName,
+            WaitForProcessStartTicks = waitForStart,
             ApplierQuiescenceTimeout = TimeSpan.FromSeconds(Math.Max(1, quiescenceSeconds)),
             ApplierPollInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds)),
         };
@@ -160,6 +166,8 @@ internal static class Program
         Console.WriteLine("暂存更新的落地（宿主退出后跑；库不自己 spawn 进程，见 AGENT.md §12.5）：");
         Console.WriteLine("  --apply                   只做落地：把 UpdaterStage 里已就绪的内容换上去");
         Console.WriteLine("  --wait-for-pid <PID>      --apply 时先等这个进程退出（宿主把自己的 PID 传进来）");
+        Console.WriteLine("  --wait-for-name <名字>    连同 PID 一起认宿主（PID 会被系统复用，光凭 PID 认不准）");
+        Console.WriteLine("  --wait-for-start <ticks>  宿主的启动时刻，唯一实例标识（后两个由 BuildApplyCommand 自动填，宿主不用管）");
         Console.WriteLine("  --quiescence-timeout <秒> --apply 时等树静的时限（默认 600）");
         Console.WriteLine("  --poll-seconds <秒>       --apply 时的轮询间隔（默认 2）");
     }
