@@ -119,6 +119,26 @@ public class StagedUpdateTests
         Assert.Equal(2, plan!.Actions.Count);
     }
 
+    /// <summary>§12.7：回退窗口止于"下一次更新开始" —— 上一轮落地留下的备份，下一轮暂存开始时就该清掉。</summary>
+    [Fact]
+    public void StagedRun_ClearsThePreviousRoundsBackups_AtStartup()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+        Assert.Equal(UpdateOutcome.Updated, new StagedApplier(Cfg(e)).Run().Outcome);
+        Assert.True(Directory.Exists(StageLayout.OldRoot(e.Client)), "落地后应当留着备份（回退窗口）");
+        Assert.True(File.Exists(StageLayout.OldPath(e.Client, "bin/a.dll")));
+
+        // 同一目标版本再跑一轮暂存（这次是 UpToDate）—— 清发生在会话开始时，照样会清
+        var again = new ClientUpdater(Cfg(e)).Run();
+
+        Assert.Equal(UpdateOutcome.UpToDate, again.Outcome);
+        Assert.False(Directory.Exists(StageLayout.OldRoot(e.Client)), "新一轮开始时应当把上一轮的备份清掉");
+    }
+
     [Fact]
     public void StagedRun_DefersPureRenames_UntilTheApplyStage()
     {

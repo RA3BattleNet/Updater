@@ -150,6 +150,71 @@ Client.CLI --apply --root <安装目录> --manifest-url <清单地址> [--wait-f
 
 退出码 `0` = 已落地。宿主可以直接用 `StagedApplier.BuildApplyCommand(exe, cfg)` 生成这条命令。
 
+### 2.8 宿主集成：两条落地路线与「退出后转交 applier」
+
+`UpdateConfig.ApplyMode` 选落地方式：
+
+| 模式 | 谁把文件换上去 | 何时生效 | 适合 |
+|---|---|---|---|
+| `InPlace`（默认） | 库自己，会话内同步完成 | 立即 | 不需要替换宿主自身的文件 |
+| `Staged` | 独立 applier（`Client.CLI --apply`） | **宿主退出之后** | 自更新；要求「要么整版落地、要么不动」 |
+
+**直接用（`InPlace`）**
+
+```csharp
+var cfg = new UpdateConfig { RootPath = installDir, ManifestUrl = manifestUrl };
+var r = new Updater(cfg).Run(progress);
+switch (r.Outcome)
+{
+    case UpdateOutcome.UpToDate:
+    case UpdateOutcome.Updated:           break;                    // 直接启动
+    case UpdateOutcome.NeedsHostFallback: /* 交回你的整包逻辑（BT / 直链） */ break;
+    case UpdateOutcome.Failed:            /* 提示重试；r.Detail 里有原因 */   break;
+}
+```
+
+**暂存式自更新（`Staged`）三步**
+
+```
+① 库把内容暂存好（宿主还在跑）   → 结果 Staged、PendingRestart == true、退出码 3
+② 宿主先挂起 applier，再正常退出 → applier 等宿主 PID + 等树静默
+③ applier 落地 → 写本地清单/ETag → 清理 new/（old/ 留到下一轮启动时清）
+```
+
+```csharp
+var cfg = new UpdateConfig
+{
+    RootPath = installDir,
+    ManifestUrl = manifestUrl,
+    ApplyMode = ApplyMode.Staged,
+    ApplierQuiescenceTimeout = TimeSpan.FromMinutes(10),
+};
+
+var r = new Updater(cfg).Run(progress);
+if (r.PendingRestart)
+{
+    // 【要点 1】先挂 applier，**再**开始退出：它会等我们的 PID，所以现在挂不会打架。
+    Process.Start(StagedApplier.BuildApplyCommand(applierExePath, cfg));
+
+    // 【要点 2】把「该重启了」交给你的主线程去处理；不要在更新线程里 Environment.Exit。
+    RequestShutdown("update staged");    // 你自己的机制：消息 / Dispatcher / 原子标志
+}
+```
+
+`applierExePath` 是宿主自己发布的 `Client.CLI` 可执行文件（或用 `dotnet Client.CLI.dll`）。
+
+**要点**
+
+1. **先挂 applier、再退出**：applier 用 `--wait-for-pid <宿主PID>` + 树内进程扫描等静默，可以在宿主还活着时启动；这样即使宿主退出过程中崩了，落地照样完成。反过来（先退再挂）就没人挂了。
+2. **不要在更新线程里直接退出进程**：更新很可能不在主线程。库不碰进程生命周期（AGENT.md §4.12），「退出」是宿主的事 —— 请把 `PendingRestart` 变成信号交给主循环，由主线程按自己的顺序保存状态、关窗、退出。
+3. **不要重定向 applier 的 stdio**（`BuildApplyCommand` 已不带重定向）：管道会随宿主退出而失效，applier 写日志就会出错。
+4. **别把 applier 放进带 `KILL_ON_JOB_CLOSE` 的 Job Object**，否则宿主一退它被一起杀。用了 Job 的宿主请改用计划任务 / 一次性开机项，或设 `psi.UseShellExecute = true`。
+5. **落地要树静默**：宿主退出时别留下还在树里跑的进程（托盘、helper、mod 工具都算）。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。
+6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行按 AGENT.md §12.6 续做；最坏是「这次没生效」，不会「半个版本」。
+7. **离线也能落地**：阶段一把远端清单原文留在缓存里，applier 用它校验暂存内容；缓存不在才联网重取。
+8. **两种模式互斥**：存在待提交计划时，`InPlace` 会被拒（`reason=pending_staged_apply`）。
+9. **回退窗口**：落地后 `old/` 留着上一版备份，到**下一轮暂存开始时**（且上次已落地）自动清掉。
+
 ## 3. 服务端（发布流水线）
 
 三步，**必须按版本顺序链式生成**（否则 UUID 链断裂 → 补丁全部落空且不报错）：

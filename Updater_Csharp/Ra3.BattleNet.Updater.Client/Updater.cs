@@ -103,9 +103,17 @@ public sealed class Updater
 
         // §12.7：同一棵树上两种落地模式互斥。若存在待提交计划却走直接更新，
         // 随后运行的 applier 会拿旧计划覆盖刚由直接模式换好的新文件 —— 必须拒绝。
-        if (!staged && StageLayout.HasPendingPlan(_cfg.RootPath))
+        var pendingStagedPlan = StageLayout.HasPendingPlan(_cfg.RootPath);
+
+        if (!staged && pendingStagedPlan)
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.PendingStagedApply,
                 $"检测到已暂存但未落地的更新（{StageLayout.DirName}/）：请先让宿主退出以完成落地，或删除该目录后重试");
+
+        // 暂存模式：**没有待提交计划时**，本轮开始前把上一轮的备份清掉
+        //（§12.7：回退窗口止于"下一次更新开始"）。有待提交计划时不清 ——
+        // 那份备份仍是它的回退材料，交给 applier 在落地时清。
+        if (staged && !pendingStagedPlan)
+            StageLayout.ClearOld(_cfg.RootPath);
 
         var etagPath = Path.Combine(cacheDir, "manifest.etag");
         var remotePath = Path.Combine(cacheDir, "manifest.remote.xml");
