@@ -99,7 +99,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 
 `Reason` 里几个值得宿主单独认的：`pending_staged_apply`（有已暂存未落地的更新，却走了就地模式）、
 `staged_plan_stale`（暂存内容对应的远端清单已经变了，本轮不落地）、
-`tree_busy`（等不到树静默，**一个文件都没动**）、
+`tree_busy`（等不到树静默：宿主 PID 未退出，或**清单里列出的 `.exe`** 仍在树内运行；**一个文件都没动**）、
 `path_escape`（**清单或计划里有逃出安装根的路径 → 整个更新被拒**）。
 
 ### 2.4 取消与超时
@@ -236,7 +236,7 @@ if (r.PendingRestart)
 3. **不要重定向 applier 的 stdio**（`BuildApplyCommand` 已不带重定向）：管道会随宿主退出而失效，applier 写日志就会出错。
 4. **别把 applier 放进带 `KILL_ON_JOB_CLOSE` 的 Job Object**，否则宿主一退它被一起杀（**子进程默认继承作业成员身份**）。先确认宿主到底有没有这种作业 —— 自写启动器通常没有（代码里不出现 `CreateJobObject` 就没有）。真有的话，可靠解是**换掉"创建者"**：计划任务、WMI `Win32_Process.Create`（由服务创建，天然在作业外）、或 `explorer.exe <路径>`。
    **别指望 `UseShellExecute = true`**：它**不保证**脱离作业，代价却是失去 .NET 的正确参数转义（`UseShellExecute=true` 时 `ArgumentList` 不能用，得自己拼命令行 —— 我们的路径又长、又带空格和中文），还可能出现控制台窗口。不值当。
-5. **落地要树静默**：宿主退出时别留下还在树里跑的进程（托盘、helper、mod 工具都算）。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。
+5. **落地要树静默**：宿主必须**真的退出**（applier 等的是宿主 PID），并且**清单里列出的 `.exe`** 不能在树内还在跑。扫描范围就是这两条 —— 树内**不被 manifest 管理**的 exe（自备工具、临时进程、WebView2 子进程等）**不会**被判为繁忙，它们的影响是"占着文件导致改名失败"，那时返回 `io_error` 而非 `tree_busy`。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。（判据原文见 `AGENT.md` §12.5）
 6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行会自动续做；最坏是「这次没生效」，不会「半个版本」。
 7. **离线也能落地**：阶段一把远端清单原文留在缓存里，applier 用它校验暂存内容，**落地阶段零网络**；缓存不在才联网重取，那条路上顺手拿到 ETag 并写下来。用缓存离线落地时拿不到 ETag 就不写 —— 下一轮做一次完整 GET，无害。
 8. **两种模式互斥**：存在待提交计划时，`InPlace` 会被拒（`reason=pending_staged_apply`）。
