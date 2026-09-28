@@ -445,5 +445,11 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 | ubuntu live-server ISO 相邻版本 | 1.2G → 1.2G | 耗时过长 | 耗时过长 | 1.1G | **695M** |
 | `amdvlk32.dll` → `amdvlk64.dll` | 102M → 115M | **23M** | 23M | 24M | 63M |
 
+> **⚠️ 上表是早期数据（参数不当时测的），别照它下结论。** 当时用 `-s` 流式且**没有加压缩**
+> （`-c-…` 默认是 **uncompress**），所以 HDiffPatch 的补丁明显偏大 —— HDiffPatch 作者本人
+> 就是看到这张表来提 issue 的。现在实现的参数是 `-m`（内存够时，否则 `-s`）+ `-c-lzma`，
+> 同一批内容对实测从 69.7% 降到 21.5%（约 3.2 倍）；当前参数下的实测与复核见
+> `Server.PatchGenerator/README.md`。
+
 结论：小文件 bsdiff 更小，大文件 hdiffpatch 明显更优；本项目统一用 **hdiffz/hpatchz**，
 参数为 `-m`（内存够时）否则 `-s`（流式），统一 `-c-lzma`。

@@ -26,6 +26,8 @@
     <Content Include="hdiffpatch_bin\win-x64\**" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="hdiffpatch_bin\win-x86\**" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="hdiffpatch_bin\linux-x64\**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- MIT 要求保留版权与许可声明：这个文件必须跟二进制一起进产物 -->
+    <Content Include="hdiffpatch_bin\LICENSE-HDiffPatch.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

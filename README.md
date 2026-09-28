@@ -89,4 +89,5 @@ dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release Stage
 | `Updater_Csharp/README.md` | **接入方主文档**：客户端引用与用法、宿主集成（§2.8）、发布流水线、协议、测试、部署与 CDN 要求 |
 | `Updater_Csharp/Ra3.BattleNet.Updater.XmlGenerator/README.md` | 清单生成壳：UUID 四条来路与自动关联规则、自检报告怎么读 |
 | `Updater_Csharp/Ra3.BattleNet.Updater.Server.PatchGenerator/README.md` | 补丁生成壳：hdiffz 参数取舍、`--compress-files` 为什么默认关 |
+| `THIRD-PARTY.md` | 随包第三方二进制（HDiffPatch / libdivsufsort）的许可、来源与更新步骤 |
 

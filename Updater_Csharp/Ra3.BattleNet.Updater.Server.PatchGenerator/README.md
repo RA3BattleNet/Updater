@@ -41,6 +41,27 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
 
 实测（v4→v5 的真实内容对）：`-s` 69.7% → `-m -c-lzma` **21.5%**，约 **3.2 倍**。
 
+### 2026-09-28 复核：上游作者建议的 `-m-4 -SD -c-lzma2-9-128m`
+
+HDiffPatch 作者在 issue 里建议过这组参数。逐项核对 + 实测（真实内容对
+`System.Private.CoreLib.dll` 12,536,080 → 15,538,440 字节，win-x64 v5.1.3 的 `hdiffz`）：
+
+| 参数 | 补丁大小 | 占目标 | 耗时 |
+|---|---|---|---|
+| `-m -c-lzma`（**当前实现**） | 4,338,208 B | 27.92% | 3.03 s |
+| `-m -c-lzma-9-128m` | 4,337,549 B | 27.91% | 2.96 s |
+| `-m -c-lzma2-9-128m` | 4,338,629 B | 27.92% | 3.04 s |
+| `-m-4 -SD -c-lzma2-9-128m`（作者建议） | **4,317,615 B** | **27.79%** | 3.01 s |
+
+- **`-m-4` 就是 `-m`**：v5.1.3 的 `-m` 默认 `matchScore=4`、`-s` 默认 `matchBlockSize=64`（`hdiffz -h` 原文）。
+  也就是说作者建议的 `-m-4`（和 `-s-64`）与我们现在的写法**是同一个东西**。
+- **调压缩级别/字典没有收益**：`-c-lzma` 默认 level 7 已饱和（27.92% ↔ 27.91%，差 0.01 个百分点）。
+- **`-SD` 真有用，但很小**：小 20 KB（0.13 个百分点），耗时不变。它换的是**补丁格式**
+  （`HDIFFSF20` 单块压缩流：打补丁只需一个解压缓冲、支持"边下载边打补丁"、支持多线程）。
+  兼容性已实测：**v5.1.3 x64 与 v4.8.0 x86 的 hpatchz 都能正确还原**（32 位宿主那个老版本没问题）。
+- **暂未切换默认参数**：0.13% 的收益要先用真实 5 版本数据抽样复核（`_sim/benchmark-hdiffz.ps1`）再定，
+  而且换格式要连带确认客户端那条"分步/多线程打补丁"的路没被意外启用。
+
 ## `--compress-files`：`files/{md5}.bin.gz` 预压缩旁挂（**默认关闭**）
 
 - **客户端目前不消费它。** 客户端只请求 `files/{md5}.bin`；那条"优先取 `.gz` 并自己解压"的分支
@@ -64,6 +85,9 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
 - 外部工具随包提供 **win-x64 / win-x86 / linux-x64**（`HdiffTool.ShippedRids`）：x64 是主场，`linux-x64`
   给 Linux 发布机，`win-x86` 给 32 位宿主（官方 v5.1.3 没有 windows32 资产，随包的是 **v4.8.0**）。
   其他平台请自行放入 `hdiffpatch_bin/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
+- 【必须】**随包二进制必须带上游许可声明**：`hdiffpatch_bin/LICENSE-HDiffPatch.txt`（MIT，含 HDiffPatch
+  与它内嵌的 libdivsufsort）。MIT **不要求通知作者、也不要求开源本项目**，唯一要求是保留版权与许可全文 ——
+  所以这个文件不能删，`Share.csproj` 也把它设成随产物复制（见根 `THIRD-PARTY.md`）。
 
 相关：`XmlGenerator/README.md`（清单生成与"猜改名"）、仓库 `README.md`（总览与文档地图）。
 ---
