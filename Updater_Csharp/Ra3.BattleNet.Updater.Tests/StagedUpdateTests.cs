@@ -296,6 +296,9 @@ public class StagedUpdateTests
         Assert.True(p.ExitCode == 3, $"暂存模式应当以退出码 3 结束（实得 {p.ExitCode}）；stderr={stderr}");
         using var doc = JsonDocument.Parse(stdout);
         Assert.Equal("Staged", doc.RootElement.GetProperty("Outcome").GetString());
+        // 独立进程壳（宿主不是 C#）只能读这行 JSON —— 重启信号必须在里面
+        Assert.True(doc.RootElement.GetProperty("PendingRestart").GetBoolean(), "JSON 必须带 PendingRestart");
+        Assert.True(doc.RootElement.GetProperty("Applied").GetBoolean(), "Staged 也算宿主可以跳过自己的更新逻辑");
         Assert.True(StageLayout.HasPendingPlan(e.Client));
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);
     }

@@ -48,32 +48,8 @@ internal static class Program
             return 1;
         }
 
-        if (json)
-        {
-            Console.WriteLine(JsonSerializer.Serialize(new
-            {
-                Outcome = result.Outcome.ToString(),
-                result.Reason,
-                result.Detail,
-                result.HttpVersion,
-                result.Total,
-                result.Skipped,
-                result.Moved,
-                result.Patched,
-                result.Full,
-                result.FailedCount,
-                result.BytesDownloaded,
-                result.PayloadBytes,
-                result.WireBytes,
-                result.WireSentBytes,
-                result.WireReceivedBytes,
-                Ms = (long)result.Elapsed.TotalMilliseconds,
-            }));
-        }
-        else
-        {
-            Console.WriteLine(result.ToString());
-        }
+        // 机器可读的字段集由库定义（UpdateResult.ToJson），壳不再自己抄一份
+        Console.WriteLine(json ? result.ToJson() : result.ToString());
 
         // 暂存模式：内容已就绪但**还没生效**，必须与"已更新"分开表达（AGENT.md §12.7）
         if (result.Outcome == UpdateOutcome.Staged) return 3;

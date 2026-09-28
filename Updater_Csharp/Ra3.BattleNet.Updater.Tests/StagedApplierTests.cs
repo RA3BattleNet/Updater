@@ -133,6 +133,29 @@ public class StagedApplierTests
     }
 
     [Fact]
+    public void Apply_AfterRefetchingTheManifest_AlsoWritesTheEtag()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        var etagPath = Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.etag");
+        Assert.False(File.Exists(etagPath), "阶段一不写 ETag（§12.7）");
+
+        // 删掉缓存里的远端原文 → applier 只能联网重取；这条路上它拿到了 ETag，落地后应当写下来
+        File.Delete(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"));
+
+        var applied = new StagedApplier(Cfg(e)).Run();
+
+        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
+        Assert.True(File.Exists(etagPath), "重取路径拿到了 ETag，落地后应当写下来（下一轮才能 304）");
+        Assert.StartsWith("\"", File.ReadAllText(etagPath));
+        Assert.Equal(TestSupport.Md5File(e.M2), TestSupport.Md5File(Path.Combine(e.Client, "manifest.xml")));
+    }
+
+    [Fact]
     public void Apply_WithTheCachedManifest_LandsTheStagedVersion_EvenIfTheRemoteMovedOn()
     {
         using var tmp = new TempDir();

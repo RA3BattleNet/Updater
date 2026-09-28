@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>更新会话的结果类型（AGENT.md §4.12：宿主只需一个 switch）。</summary>
@@ -54,6 +56,33 @@ public sealed record UpdateResult(
 
     /// <summary>已就绪但尚未生效，需要宿主退出/重启后才落地（暂存模式）。</summary>
     public bool PendingRestart => Outcome is UpdateOutcome.Staged;
+
+    /// <summary>
+    /// 一行 JSON 结果 —— 机器可读的稳定契约（字段只增不改）。
+    /// 独立进程壳（宿主不是 C#）与 CI 都读它；<see cref="Applied"/> /
+    /// <see cref="PendingRestart"/> 必须在里面，否则壳只能靠退出码猜。
+    /// </summary>
+    public string ToJson() => JsonSerializer.Serialize(new
+    {
+        Outcome = Outcome.ToString(),
+        Reason,
+        Detail,
+        HttpVersion,
+        Applied,
+        PendingRestart,
+        Total,
+        Skipped,
+        Moved,
+        Patched,
+        Full,
+        FailedCount,
+        BytesDownloaded,
+        PayloadBytes,
+        WireBytes,
+        WireSentBytes,
+        WireReceivedBytes,
+        Ms = (long)Elapsed.TotalMilliseconds,
+    });
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
