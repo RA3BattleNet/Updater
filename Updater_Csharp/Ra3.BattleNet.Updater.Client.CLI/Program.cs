@@ -2,7 +2,7 @@ using System.Text.Json;
 using Ra3.BattleNet.Updater.Client;
 using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 
-namespace Ra3.BattleNet.Updater.Client.Update;
+namespace Ra3.BattleNet.Updater.Client.CLI;
 
 /// <summary>
 /// 独立进程壳：跑一次更新并给出结构化结果（AGENT.md §4.12）。
@@ -153,7 +153,7 @@ internal static class Program
 
     private static void ShowUsage()
     {
-        Console.WriteLine("用法: Client.Update.exe --root <安装目录> --manifest-url <远端清单地址> [选项]");
+        Console.WriteLine("用法: Client.CLI.exe --root <安装目录> --manifest-url <远端清单地址> [选项]");
         Console.WriteLine();
         Console.WriteLine("  --local-manifest <路径>   本地清单路径（默认 <root>/manifest.xml）");
         Console.WriteLine("  --cache-dir <目录>        缓存目录（默认 <系统临时目录>/updater-cache/<安装根指纹>）");

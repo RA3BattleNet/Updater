@@ -19,7 +19,7 @@
 | `Updater_Csharp/Ra3.BattleNet.Updater.Client` | **更新引擎**（客户端只需引用它） |
 | `Updater_Csharp/Ra3.BattleNet.Updater.Server` | 清单生成 + 生成期自检 + 补丁生成（发布侧引用的库） |
 | `Updater_Csharp/Ra3.BattleNet.Updater.{XmlGenerator,Server.PatchGenerator}` | 发布流水线的两个壳 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Client.Update` | 独立进程更新入口（壳） |
+| `Updater_Csharp/Ra3.BattleNet.Updater.Client.CLI` | 独立进程更新入口（壳） |
 | `Updater_Csharp/Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试 |
 
 ## 文档

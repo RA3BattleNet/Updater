@@ -19,7 +19,7 @@
 | `Ra3.BattleNet.Updater.Server` | **服务端发布逻辑**：清单生成 + 生成期自检 + 补丁生成 |
 | `Ra3.BattleNet.Updater.XmlGenerator` | 壳：生成 `manifest.xml`（含自检报告） |
 | `Ra3.BattleNet.Updater.Server.PatchGenerator` | 壳：生成 `patches/` 与 `files/` |
-| `Ra3.BattleNet.Updater.Client.Update` | 壳：独立进程跑一次更新（宿主不是 C# 时用） |
+| `Ra3.BattleNet.Updater.Client.CLI` | 壳：独立进程跑一次更新（宿主不是 C# 时用） |
 | `Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试 |
 
 约定：**核心逻辑 = 无后缀的库项目**（`Share` / `Core` / `Server`），**可执行壳 = 带后缀、按角色命名**。
@@ -132,7 +132,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 ### 2.7 独立进程壳（宿主不是 C# 时）
 
 ```
-Client.Update --root <安装目录> --manifest-url <清单地址> [选项]
+Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
   --local-manifest <路径>   --cache-dir <目录>   --tools-dir <目录>   --log <路径>
   --exclude <列表>          --fallback <列表>    --concurrency <N>
   --threshold-files <N>     --threshold-ratio <R>  --verify-unchanged   --json
@@ -236,7 +236,7 @@ copy new.xml <服务端目录>\manifest.xml
 python simple_test_web_server/file_server.py --port 23456 --dir <服务端目录>
 
 # 4) 跑一次更新（把 old 的内容拷进 client 目录，并放入 old.xml 作为本地清单）
-dotnet run --project Ra3.BattleNet.Updater.Client.Update -- `
+dotnet run --project Ra3.BattleNet.Updater.Client.CLI -- `
   --root <client目录> --manifest-url http://127.0.0.1:23456/manifest.xml
 ```
 
@@ -286,7 +286,7 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 ### 8.2 更早的 SQLite + `patches.json` 索引链路 —— 更早已取代
 
 `Server.PatchIndexGenerator`（SQLite + `patches.json` 索引）与 `Client.PatchIndexApplyer` 已被
-`Server.PatchGenerator` 与 `Client.Update` 取代：现在**没有索引文件**，补丁按内容对直接寻址。
+`Server.PatchGenerator` 与 `Client.CLI` 取代：现在**没有索引文件**，补丁按内容对直接寻址。
 
 ### 8.3 HDiffPatch 选型对比（当年数据，供参考）
 

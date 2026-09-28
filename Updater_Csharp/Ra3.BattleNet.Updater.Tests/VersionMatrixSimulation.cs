@@ -627,8 +627,8 @@ public class VersionMatrixSimulation
         Publish(5);
         var client = NewClient(name, 3);
 
-        var shell = Path.Combine(RepoRoot(), "Ra3.BattleNet.Updater.Client.Update",
-            "bin", "Release", "net10.0", "Ra3.BattleNet.Updater.Client.Update.dll");
+        var shell = Path.Combine(RepoRoot(), "Ra3.BattleNet.Updater.Client.CLI",
+            "bin", "Release", "net10.0", "Ra3.BattleNet.Updater.Client.CLI.dll");
         Assert.True(File.Exists(shell), $"找不到壳：{shell}");
 
         using var http = new TestHttpServer(ServerDir);
@@ -664,7 +664,7 @@ public class VersionMatrixSimulation
             root.GetProperty("Detail").GetString() ?? string.Empty,
             root.GetProperty("HttpVersion").GetString() ?? string.Empty);
 
-        var extra = $"- **壳**：`dotnet Client.Update.dll --root … --manifest-url … --json`\n" +
+        var extra = $"- **壳**：`dotnet Client.CLI.dll --root … --manifest-url … --json`\n" +
                     $"- 退出码：{p.ExitCode}（约定 0 = 已最新或已更新）\n" +
                     $"- stdout：`{stdout.Trim()}`\n" +
                     (stderr.Trim().Length > 0 ? $"- stderr：`{stderr.Trim()}`\n" : string.Empty) +

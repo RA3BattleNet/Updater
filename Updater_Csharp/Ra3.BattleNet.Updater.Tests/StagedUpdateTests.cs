@@ -253,8 +253,8 @@ public class StagedUpdateTests
         var e = Prepare(tmp);
         using var _ = e.Http;
 
-        var shell = Path.Combine(RepoRoot(), "Ra3.BattleNet.Updater.Client.Update",
-            "bin", "Release", "net10.0", "Ra3.BattleNet.Updater.Client.Update.dll");
+        var shell = Path.Combine(RepoRoot(), "Ra3.BattleNet.Updater.Client.CLI",
+            "bin", "Release", "net10.0", "Ra3.BattleNet.Updater.Client.CLI.dll");
         Assert.True(File.Exists(shell), $"找不到壳：{shell}");
 
         var psi = new ProcessStartInfo("dotnet")
@@ -284,10 +284,10 @@ public class StagedUpdateTests
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null
-               && !Directory.Exists(Path.Combine(dir.FullName, "Ra3.BattleNet.Updater.Client.Update")))
+               && !Directory.Exists(Path.Combine(dir.FullName, "Ra3.BattleNet.Updater.Client.CLI")))
             dir = dir.Parent;
 
-        Assert.True(dir is not null, "找不到仓库根（含 Ra3.BattleNet.Updater.Client.Update 的目录）");
+        Assert.True(dir is not null, "找不到仓库根（含 Ra3.BattleNet.Updater.Client.CLI 的目录）");
         return dir!.FullName;
     }
     // ---------------------------------------------------------------- 断言工具
