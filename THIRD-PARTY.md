@@ -8,7 +8,7 @@
 | **HDiffPatch**（hdiffz / hpatchz） | MIT，`Copyright (c) 2012-2025 housisong`（v4.8.0 为 `2012-2023`） | `win-x64`、`linux-x64` 为 **v5.1.3**；`win-x86` 为 **v4.8.0** | https://github.com/sisong/HDiffPatch |
 | **libdivsufsort** | MIT，`Copyright (c) 2003-2008 Yuta Mori` | HDiffPatch 内嵌（不单独分发） | https://github.com/y-256/libdivsufsort |
 
-许可全文（两个组件各一段，逐字复制自上游）：`Updater_Csharp/Ra3.BattleNet.Updater.Share/hdiffpatch_bin/LICENSE-HDiffPatch.txt`
+许可全文（两个组件各一段，逐字复制自上游）：`Ra3.BattleNet.Updater.Share/hdiffpatch_bin/LICENSE-HDiffPatch.txt`
 
 ## 更新二进制时要做什么
 

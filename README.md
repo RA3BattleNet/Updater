@@ -13,10 +13,10 @@
 | 顺序 | 看什么 | 为什么 |
 |---|---|---|
 | 1 | 本文的「关键设计」+「现状与必读」 | 先建立心智模型，别急着抄代码 |
-| 2 | `Updater_Csharp/README.md` §2 | **接入方只需要这一章**：怎么引用、最小用法、返回值、配置、宿主集成 |
+| 2 | `USAGE.md` §2 | **接入方只需要这一章**：怎么引用、最小用法、返回值、配置、宿主集成 |
 | 3 | 同上 §2.8 | 自更新 / 转交 applier 的**全部规矩与坑**（不支持的场景、宿主义务、可选代重启） |
-| 4 | `Updater_Csharp/Ra3.BattleNet.Updater.Client/Updater.cs`、`StagedApplier.cs` | 想知道"它到底怎么做的"再进代码 |
-| 5 | `Updater_Csharp/README.md` §3 / §5 | 发布侧怎么生成产物、怎么本地跑通一遍 |
+| 4 | `Ra3.BattleNet.Updater.Client/Updater.cs`、`StagedApplier.cs` | 想知道"它到底怎么做的"再进代码 |
+| 5 | `USAGE.md` §3 / §5 | 发布侧怎么生成产物、怎么本地跑通一遍 |
 | 6 | `XmlGenerator/README.md`、`Server.PatchGenerator/README.md` | 发布参数与取舍细节（UUID 关联规则、hdiffz 参数） |
 
 ## 关键设计
@@ -32,7 +32,7 @@
 
 **已经验证过的**：内容寻址协议与清单格式、增量 / 补丁 / 纯改名 / 回落的正确性、
 中断续做、暂存更新的两个阶段（含 Cloudflare R2 真机端到端）、宿主身份判定、路径信任边界。
-测试怎么跑、验收覆盖到哪些条目，见 `Updater_Csharp/README.md` §6。
+测试怎么跑、验收覆盖到哪些条目，见 `USAGE.md` §6。
 
 **还没验证 / 明确不做的**：
 
@@ -44,7 +44,7 @@
 | 提权 / Program Files | 库**自己绝不提权、不弹 UAC**。宿主提权则整条链路都提权；宿主不提权则**安装根必须对当前用户可写**（阶段一就要往 `<root>/UpdaterStage/` 写） |
 | CI | **不做**。回归靠人工跑全套（见 §6），没有 CI 配置也不需要 |
 
-**接入前最容易踩的七条**（详情在 `Updater_Csharp/README.md` §2.8）：
+**接入前最容易踩的七条**（详情在 `USAGE.md` §2.8）：
 
 1. **测试与验收必须用 NTFS**（落地语义依赖 NTFS 行为）；测试临时目录用环境变量 `UPDATER_TEST_TMP` 指到 NTFS 盘。
 2. **暂存模式是 opt-in**（`ApplyMode.Staged`），默认是就地更新。
@@ -58,12 +58,12 @@
 
 | 路径 | 角色 |
 |---|---|
-| `Updater_Csharp/Ra3.BattleNet.Updater.Share` | 共享层：协议模型（清单格式）、哈希、外部工具封装 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Client` | **客户端更新引擎**（无 UI、无产品耦合）—— 客户端只需引用它 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Server` | **服务端发布逻辑**：清单生成 + 生成期自检 + 补丁生成 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.{XmlGenerator,Server.PatchGenerator}` | 发布流水线的两个壳 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Client.CLI` | 独立进程壳：跑一次更新 / 落地（`--apply`）；宿主不是 C# 时用 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试（自带反射跑器，原因见 §6） |
+| `Ra3.BattleNet.Updater.Share` | 共享层：协议模型（清单格式）、哈希、外部工具封装 |
+| `Ra3.BattleNet.Updater.Client` | **客户端更新引擎**（无 UI、无产品耦合）—— 客户端只需引用它 |
+| `Ra3.BattleNet.Updater.Server` | **服务端发布逻辑**：清单生成 + 生成期自检 + 补丁生成 |
+| `Ra3.BattleNet.Updater.{XmlGenerator,Server.PatchGenerator}` | 发布流水线的两个壳 |
+| `Ra3.BattleNet.Updater.Client.CLI` | 独立进程壳：跑一次更新 / 落地（`--apply`）；宿主不是 C# 时用 |
+| `Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试（自带反射跑器，原因见 §6） |
 
 约定：**核心逻辑 = 无后缀的库项目**（`Share` / `Client` / `Server`），**可执行壳 = 按角色命名**。
 `Share` 被两侧共用；客户端库与服务端库**互不依赖**，各自只依赖 `Share`。
@@ -72,22 +72,22 @@
 
 ```powershell
 # 构建
-dotnet build Updater_Csharp/Ra3.BattleNet.sln -c Release
+dotnet build Ra3.BattleNet.sln -c Release
 
 # 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径）
 $env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
-dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release            # 全套
-dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑名字含 Staged 的
+dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套
+dotnet run --project Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑名字含 Staged 的
 ```
 
-完整的两版生成 → 发布 → 客户端更新示例见 `Updater_Csharp/README.md` §5。
+完整的两版生成 → 发布 → 客户端更新示例见 `USAGE.md` §5。
 
 ## 文档地图
 
 | 文档 | 管什么 |
 |---|---|
-| `Updater_Csharp/README.md` | **接入方主文档**：客户端引用与用法、宿主集成（§2.8）、发布流水线、协议、测试、部署与 CDN 要求 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.XmlGenerator/README.md` | 清单生成壳：UUID 四条来路与自动关联规则、自检报告怎么读 |
-| `Updater_Csharp/Ra3.BattleNet.Updater.Server.PatchGenerator/README.md` | 补丁生成壳：hdiffz 参数取舍、`--compress-files` 为什么默认关 |
+| `USAGE.md` | **接入方主文档**：客户端引用与用法、宿主集成（§2.8）、发布流水线、协议、测试、部署与 CDN 要求 |
+| `Ra3.BattleNet.Updater.XmlGenerator/README.md` | 清单生成壳：UUID 四条来路与自动关联规则、自检报告怎么读 |
+| `Ra3.BattleNet.Updater.Server.PatchGenerator/README.md` | 补丁生成壳：hdiffz 参数取舍、`--compress-files` 为什么默认关 |
 | `THIRD-PARTY.md` | 随包第三方二进制（HDiffPatch / libdivsufsort）的许可、来源与更新步骤 |
 

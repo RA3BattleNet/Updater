@@ -113,7 +113,7 @@ HDiffPatch 作者在 issue 里建议过这组参数。逐项核对 + 实测（�
   与它内嵌的 libdivsufsort）。MIT **不要求通知作者、也不要求开源本项目**，唯一要求是保留版权与许可全文 ——
   所以这个文件不能删，`Share.csproj` 也把它设成随产物复制（见根 `THIRD-PARTY.md`）。
 
-相关：`XmlGenerator/README.md`（清单生成与"猜改名"）、仓库 `README.md`（总览与文档地图）。
+相关：`../Ra3.BattleNet.Updater.XmlGenerator/README.md`（清单生成与"猜改名"）、仓库 `README.md`（总览与文档地图）。
 ---
 
-> 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）
+> 返回总览：[仓库入口 `README.md`](../USAGE.md) · 接入用法：[`USAGE.md`](../USAGE.md)（客户端库 + 宿主集成）
