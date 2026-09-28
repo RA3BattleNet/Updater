@@ -138,4 +138,6 @@ v5:  dotnet\shared\Microsoft.NETCore.App\10.0.5\System.Private.CoreLib.dll   14.
 - 规范：`AGENT.md` §5.1（UUID 继承两条规则）、§5.2（生成期自检）、§3.4（版本身份 vs 文件身份）
 - 实测数据与场景矩阵：`增量更新器/_sim/analysis.md`（S16 / S17 / S20 三个场景）
 - 客户端侧为什么"配错也没事"：`AGENT.md` §4.3 ⑤、§5.3
+---
 
+> 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）

@@ -66,3 +66,6 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
   其他平台请自行放入 `hdiffpatch_bin/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
 
 相关：`XmlGenerator/README.md`（清单生成与"猜改名"）、`AGENT.md` §5.3 / §7.1。
+---
+
+> 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）
