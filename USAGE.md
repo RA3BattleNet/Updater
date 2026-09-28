@@ -151,7 +151,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `LogPath` | `<LocalApplicationData>/updater-logs/<安装根指纹>/update.log` | 日志路径；**故意不放临时目录**（日志是事后要看的东西） |
 | `MaxLogBytes` | 8 MiB | 超过即轮转为 `update.log.1`（只留一代）；0 = 不轮转 |
 | `SessionTimeout` | 2 小时 | 整轮时限（最后一道保险） |
-| `VerifyUnchangedFiles` | `false` | 对"判定无需更新"的文件也重算哈希（慢，能发现本地损坏） |
+| `VerifyUnchangedFiles` | `false` | 对"判定无需更新"的文件也重算哈希（慢，能发现本地损坏）。**开了它会跳过"已最新"的捷径**：即使清单没变也逐文件核对磁盘 —— 宿主"修复资源"按钮用这个 |
 
 > `CacheDir` / `LogPath` 的默认值都带一个**安装根指纹** = `<安装根目录名（≤24 字符）>-<根路径 SHA-256 前 16 位>`。
 > 同一台机器上不同安装目录各有各的缓存与日志 —— **单实例锁与续传状态都按缓存目录定位**，
