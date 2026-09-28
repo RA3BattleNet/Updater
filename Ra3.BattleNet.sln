@@ -6,6 +6,7 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "解决方案项", "解决方案项", "{9FA3D6BD-1EC1-3BA5-80CB-CE02773A58D5}"
 	ProjectSection(SolutionItems) = preProject
 		README.md = README.md
+		USAGE.md = USAGE.md
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Share", "Ra3.BattleNet.Updater.Share\Ra3.BattleNet.Updater.Share.csproj", "{44B47682-1268-47B6-A87F-8B944F125D0A}"
@@ -13,8 +14,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.XmlGenerator", "Ra3.BattleNet.Updater.XmlGenerator\Ra3.BattleNet.Updater.XmlGenerator.csproj", "{BF12B5E9-46FA-45C0-9542-B4373575A21E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Server", "Ra3.BattleNet.Updater.Server\Ra3.BattleNet.Updater.Server.csproj", "{583DA888-DA68-4D40-AB1D-6D6DF806EEB2}"
-EndProject
-Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "simple_test_web_server", "simple_test_web_server\simple_test_web_server.pyproj", "{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ra3.BattleNet.Updater.Client", "Ra3.BattleNet.Updater.Client\Ra3.BattleNet.Updater.Client.csproj", "{6EBB5C94-548A-42E8-8EEC-A72B3DE38935}"
 EndProject
@@ -98,16 +97,6 @@ Global
 		{583DA888-DA68-4D40-AB1D-6D6DF806EEB2}.Release|x64.Build.0 = Release|Any CPU
 		{583DA888-DA68-4D40-AB1D-6D6DF806EEB2}.Release|x86.ActiveCfg = Release|Any CPU
 		{583DA888-DA68-4D40-AB1D-6D6DF806EEB2}.Release|x86.Build.0 = Release|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Debug|ARM.ActiveCfg = Debug|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Debug|ARM64.ActiveCfg = Debug|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Release|ARM.ActiveCfg = Release|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Release|ARM64.ActiveCfg = Release|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Release|x64.ActiveCfg = Release|Any CPU
-		{7DDB5AA4-6CAE-4586-B181-0AA3E092B926}.Release|x86.ActiveCfg = Release|Any CPU
 		{6EBB5C94-548A-42E8-8EEC-A72B3DE38935}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{6EBB5C94-548A-42E8-8EEC-A72B3DE38935}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6EBB5C94-548A-42E8-8EEC-A72B3DE38935}.Debug|ARM.ActiveCfg = Debug|Any CPU

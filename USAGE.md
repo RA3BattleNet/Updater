@@ -381,8 +381,10 @@ dotnet run --project Ra3.BattleNet.Updater.Server.PatchGenerator -- `
   --baseline old.xml --baseline-root <旧版目录> --output <服务端目录>
 copy new.xml <服务端目录>\manifest.xml
 
-# 3) 起本地静态服务器
-python simple_test_web_server/file_server.py --port 23456 --dir <服务端目录>
+# 3) 起本地静态服务器（Python 标准库自带，不用装依赖）
+#    注意：内置服务器不做 Range/ETag，客户端会退化成完整下载 —— 顺带也验证了回落路径；
+#    304 / 续传那两块由测试套件的 TestHttpServer（自带 ETag/Range）覆盖。
+python -m http.server 23456 --directory <服务端目录>
 
 # 4) 跑一次更新（把 old 的内容拷进 client 目录，并放入 old.xml 作为本地清单）
 dotnet run --project Ra3.BattleNet.Updater.Client.CLI -- `
