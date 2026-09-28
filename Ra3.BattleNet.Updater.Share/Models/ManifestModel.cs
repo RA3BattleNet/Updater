@@ -1,4 +1,3 @@
-using Ra3.BattleNet.Updater.Share.Log;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using System.Xml;
@@ -168,7 +167,6 @@ namespace Ra3.BattleNet.Updater.Share.Models
             metadataNode.AppendChild(manifestNode);
 
             xmlDoc.Save(outputPath);
-            Logger.Success($"XML保存到：{outputPath}{Environment.NewLine}");
         }
 
         private static void AddChildNode(XmlDocument doc, XmlElement parent, string name, string value)
@@ -274,12 +272,9 @@ namespace Ra3.BattleNet.Updater.Share.Models
                 foreach (XmlNode item in FileNodes)
                 {
                     var tempuuid = new Guid(item["UUID"].InnerText);
+                    // 重复 UUID 的条目**跳过**（UUID 在清单里必须唯一，见 XmlGenerator README）
                     if (Files.Any(_ => _.UUID == tempuuid))
-                    {
-                        Logger.Warning($"Manifest 中存在重复的文件\n");
-                        Logger.Debug($"{item.OuterXml}{Environment.NewLine}");
                         continue;
-                    }
                     // 只读**有判断价值**的字段（UUID/FileName/MD5/Path/Mode）。
                     // 老清单里可能还有 <Version>/<Type>/<KindOf> —— 它们是历史遗留、无人读，
                     // 这里**直接忽略**（不多看一眼），于是新旧清单都能读。

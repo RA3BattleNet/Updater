@@ -1,6 +1,5 @@
 using System.Text;
 using Ra3.BattleNet.Updater.Server;
-using Ra3.BattleNet.Updater.Share.Log;
 
 namespace Ra3.BattleNet.Updater.XmlGenerator;
 
@@ -45,9 +44,9 @@ internal static class Program
                             ? AutoLinkMode.ByName      // 保守：只用"同名"这个强信号
                             : AutoLinkMode.ByNameAndSize;
                         break;
-                    case "--debug": Logger.IsDebug = true; break;
+                    // （原先的 --debug 只置一个没人读的开关，已随 Share/Log 一起去掉）
                     default:
-                        Logger.Fail($"未知参数：{args[i]}");
+                        Console.Error.WriteLine($"未知参数：{args[i]}");
                         ShowUsage();
                         return -2;
                 }
@@ -55,13 +54,13 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Logger.Fail($"参数无法解析：{ex.Message}");
+            Console.Error.WriteLine($"参数无法解析：{ex.Message}");
             return -2;
         }
 
         if (string.IsNullOrEmpty(targetDir) || string.IsNullOrEmpty(outXml))
         {
-            Logger.Fail("缺少必要参数");
+            Console.Error.WriteLine("缺少必要参数");
             ShowUsage();
             return -1;
         }
@@ -102,6 +101,6 @@ internal static class Program
         Console.WriteLine("  --no-auto-link-uuids       关掉自动关联 UUID（默认是打开的）");
         Console.WriteLine("  --auto-link-uuids[=name]   自动关联 UUID 的形态：默认「同名优先 + 尺寸兜底」；");
         Console.WriteLine("                             =name 只信「同名」这个强信号，更保守");
-        Console.WriteLine("  --help / --debug");
+        Console.WriteLine("  --help");
     }
 }

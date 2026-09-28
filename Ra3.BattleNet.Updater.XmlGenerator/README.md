@@ -17,7 +17,7 @@ XmlGenerator --target-dir <本版目录> --new-xmloutputpath <清单输出路径
   --no-auto-link-uuids       关掉自动关联 UUID（**默认是打开的**，见下）
   --auto-link-uuids[=name]   选择自动关联的形态：默认「同名优先 + 尺寸兜底」；
                              =name 只信「同名」这个强信号，更保守
-  --help / --debug
+  --help
 ```
 
 发布流水线的推荐调用（**必须按版本顺序链式生成**，否则 UUID 链断裂 → 补丁全部落空且不报错）：
