@@ -49,7 +49,7 @@ public class FaultInjectionTests
 
         // 每次少发 1 字节（补丁只有几十字节，所以用 1 而不是 64）
         using var http = new TestHttpServer(server) { TruncateBytes = 1 };
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new ClientUpdater(cfg).Run();
 
@@ -79,7 +79,7 @@ public class FaultInjectionTests
         {
             TruncateBytes = 1, DropBodyEntirely = true, TruncateScope = TruncateScope.WithoutRange,
         };
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new ClientUpdater(cfg).Run();
 
@@ -106,7 +106,7 @@ public class FaultInjectionTests
         {
             TruncateBytes = 1, SupportRange = false, TruncateScope = TruncateScope.Every,
         };
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new ClientUpdater(cfg).Run();
 
@@ -137,7 +137,7 @@ public class FaultInjectionTests
             File.WriteAllText(p, "this is not a valid hdiff patch");
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new ClientUpdater(cfg).Run();
 
@@ -156,7 +156,7 @@ public class FaultInjectionTests
         var client = PrepareClient(tmp, v1, m1);
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         // 占住其中一个目标文件
         using (File.Open(Path.Combine(client, "f0.bin"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -181,7 +181,7 @@ public class FaultInjectionTests
         File.WriteAllText(Path.Combine(server, "manifest.xml"), "<Metadata><broken");
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new ClientUpdater(cfg).Run();
 
@@ -201,6 +201,7 @@ public class FaultInjectionTests
         var cfg = new UpdateConfig
         {
             RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = "http://127.0.0.1:1/manifest.xml",
             SessionTimeout = TimeSpan.FromSeconds(20),
         };
@@ -236,7 +237,7 @@ public class FaultInjectionTests
         Directory.CreateDirectory(Path.Combine(client, "f0.bin"));
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         var result = new ClientUpdater(cfg).Run();
 

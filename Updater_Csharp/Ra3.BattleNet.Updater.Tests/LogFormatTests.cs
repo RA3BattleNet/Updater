@@ -31,6 +31,7 @@ public class LogFormatTests
         var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = http.BaseUrl + "manifest.xml",
         }).Run();
 
@@ -139,7 +140,7 @@ public class LogFormatTests
 
         const int notFoundBody = 30_000;   // 与 CF 实测的 404 页面同量级
         using var http = new TestHttpServer(server) { PatchNotFound = true, NotFoundBodyBytes = notFoundBody };
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
 
         Assert.Equal(UpdateOutcome.Updated, new ClientUpdater(cfg).Run().Outcome);
         Assert.True(http.NotFound > 0, "应当真的探过补丁，否则这条测试没测到错误正文");
@@ -205,6 +206,7 @@ public class LogFormatTests
         var result = new ClientUpdater(new UpdateConfig
         {
             RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = http.BaseUrl + "manifest.xml",
             MaxLogBytes = 200,
         }).Run();

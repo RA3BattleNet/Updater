@@ -59,6 +59,7 @@ public class EndToEndTests
         var cfg = new UpdateConfig
         {
             RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = http.BaseUrl + "manifest.xml",
         };
 
@@ -115,7 +116,7 @@ public class EndToEndTests
         TestSupport.CopyTree(v1, client);
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
         var result = new ClientUpdater(cfg).Run();
 
         // 必须退化为「按磁盘哈希校验」：花 CPU，不花带宽
@@ -154,6 +155,7 @@ public class EndToEndTests
         var cfg = new UpdateConfig
         {
             RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = http.BaseUrl + "manifest.xml",
             FullPackageThresholdFiles = 1,   // 待下载 >= 1 即判定需要完整包
         };
@@ -194,7 +196,7 @@ public class EndToEndTests
         File.Copy(m1, Path.Combine(client, "manifest.xml"), overwrite: true);
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
         var result = new ClientUpdater(cfg).Run();
 
         Assert.True(result.Outcome == UpdateOutcome.Updated, $"期望 Updated，实得 {result}；Detail={result.Detail}");

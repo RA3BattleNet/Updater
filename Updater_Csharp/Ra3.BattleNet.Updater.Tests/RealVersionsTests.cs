@@ -60,6 +60,7 @@ public class RealVersionsTests
         var cfg = new UpdateConfig
         {
             RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = http.BaseUrl + "manifest.xml",
         };
 

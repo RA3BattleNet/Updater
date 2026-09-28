@@ -143,7 +143,7 @@ internal static class Program
         Console.WriteLine("用法: Client.Update.exe --root <安装目录> --manifest-url <远端清单地址> [选项]");
         Console.WriteLine();
         Console.WriteLine("  --local-manifest <路径>   本地清单路径（默认 <root>/manifest.xml）");
-        Console.WriteLine("  --cache-dir <目录>        缓存目录（默认 <root>/UpdaterCache）");
+        Console.WriteLine("  --cache-dir <目录>        缓存目录（默认 <系统临时目录>/updater-cache/<安装根指纹>）");
         Console.WriteLine("  --tools-dir <目录>        外部工具目录（默认程序目录）");
         Console.WriteLine("  --log <路径>              日志路径（默认 <cache-dir>/update.log）");
         Console.WriteLine("  --exclude <列表>          不受管顶层目录，逗号分隔");
