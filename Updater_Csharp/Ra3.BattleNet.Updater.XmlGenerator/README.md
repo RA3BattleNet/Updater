@@ -1,6 +1,6 @@
 # Ra3.BattleNet.Updater.XmlGenerator
 
-清单生成壳。业务逻辑在 `Ra3.BattleNet.Updater.Server.ManifestGenerator`（AGENT.md §6.1：业务逻辑不住在可执行项目里），
+清单生成壳。业务逻辑在 `Ra3.BattleNet.Updater.Server.ManifestGenerator`（业务逻辑不住在可执行项目里），
 本壳只负责"解析参数 → 调库 → 打印自检报告"。
 
 ## 用法
@@ -96,7 +96,7 @@ v5:  dotnet\shared\Microsoft.NETCore.App\10.0.5\System.Private.CoreLib.dll   14.
 
 关联只影响一件事：**客户端拿谁当"前身"去试补丁**。两道校验兜住：
 
-1. 客户端打完补丁会**校验目标文件的 MD5**，对不上立即回落完整下载（AGENT.md §4.3 ⑤）；
+1. 客户端打完补丁会**校验目标文件的 MD5**，对不上立即回落完整下载；
 2. 服务端生成补丁时有"**补丁不小于目标文件就弃用**"的规则（§5.3），无用的补丁不会进库。
 
 所以最坏的结果是：白跑一次 hdiffz + 客户端多一次往返（探测补丁 404 或校验失败），
@@ -135,9 +135,9 @@ v5:  dotnet\shared\Microsoft.NETCore.App\10.0.5\System.Private.CoreLib.dll   14.
 
 ## 相关
 
-- 规范：`AGENT.md` §5.1（UUID 继承两条规则）、§5.2（生成期自检）、§3.4（版本身份 vs 文件身份）
+- 协议与清单格式：`../README.md` §4（文件身份 = UUID、清单即版本身份、生成期自检）
 - 实测数据与场景矩阵：`增量更新器/_sim/analysis.md`（S16 / S17 / S20 三个场景）
-- 客户端侧为什么"配错也没事"：`AGENT.md` §4.3 ⑤、§5.3
+- 客户端侧为什么"配错也没事"：补丁打完会校验目标 MD5，对不上就回落完整下载（见 `../README.md` §2.3）
 ---
 
 > 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）

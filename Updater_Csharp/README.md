@@ -100,7 +100,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 `Reason` 里几个值得宿主单独认的：`pending_staged_apply`（有已暂存未落地的更新，却走了就地模式）、
 `staged_plan_stale`（暂存内容对应的远端清单已经变了，本轮不落地）、
 `tree_busy`（等不到树静默，**一个文件都没动**）、
-`path_escape`（**清单或计划里有逃出安装根的路径 → 整个更新被拒**，见 AGENT.md §4.14）。
+`path_escape`（**清单或计划里有逃出安装根的路径 → 整个更新被拒**）。
 
 ### 2.4 取消与超时
 
@@ -114,7 +114,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | 项 | 默认 | 说明 |
 |---|---|---|
 | `RootPath` | **必填** | 安装根目录 |
-| `ApplyMode` | `InPlace` | 落地模式：`InPlace` 就地替换（会话内生效）；`Staged` 只暂存到 `<root>/UpdaterStage/`，由独立 applier 在宿主退出后落地（自更新必须走这条）。见 AGENT.md §12 |
+| `ApplyMode` | `InPlace` | 落地模式：`InPlace` 就地替换（会话内生效）；`Staged` 只暂存到 `<root>/UpdaterStage/`，由独立 applier 在宿主退出后落地（自更新必须走这条）。 |
 | `ManifestUrl` | **必填** | 远端清单地址 |
 | `LocalManifestPath` | `{RootPath}/manifest.xml` | 本地清单：**它的字节就是版本身份** |
 | `CacheDir` | `<系统临时目录>/updater-cache/<安装根指纹>` | 下载产物：`.part`（续传）、内容 blob（文件名 = 目标 MD5，平铺在缓存根）、补丁缓存、`manifest.etag` / `manifest.remote.xml`；**可随时清空**（最坏重下） |
@@ -132,7 +132,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `VerifyUnchangedFiles` | `false` | 对"判定无需更新"的文件也重算哈希（慢，能发现本地损坏） |
 
 > `CacheDir` / `LogPath` 的默认值都带一个**安装根指纹** = `<安装根目录名（≤24 字符）>-<根路径 SHA-256 前 16 位>`。
-> 同一台机器上不同安装目录各有各的缓存与日志 —— **单实例锁与续传状态都按缓存目录定位**（AGENT.md §4.9），
+> 同一台机器上不同安装目录各有各的缓存与日志 —— **单实例锁与续传状态都按缓存目录定位**，
 > 两个安装共用一份缓存会把对方判成「已有实例在运行」。Windows 路径大小写不敏感，指纹先归一化再取哈希。
 > 排查时可直接打印这两个解析结果（`UpdateConfig.ResolveCacheDir()` / `ResolveLogPath()`）。`LogPath` 的优先级是：显式 `LogPath` → 显式 `CacheDir` 下的 `update.log` → 上面的默认值。
 
@@ -165,7 +165,7 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
 壳只要读这行就够了 —— `PendingRestart` 就是"该重启"这个信号，不必靠猜退出码。
 
 暂存更新（`--apply-mode staged`）模式下，**落地由另一次 `--apply` 调用完成**（宿主退出后跑；
-库不自己 spawn 进程，见 AGENT.md §12.5）：
+库不自己 spawn 进程）：
 
 ```
 Client.CLI --apply --root <安装目录> --manifest-url <清单地址> [--wait-for-pid <宿主PID>] [--quiescence-timeout 600] [--poll-seconds 2] [--json]
@@ -232,12 +232,12 @@ if (r.PendingRestart)
 **要点**
 
 1. **先挂 applier、再退出**：applier 用 `--wait-for-pid <宿主PID>` + 树内进程扫描等静默，可以在宿主还活着时启动；这样即使宿主退出过程中崩了，落地照样完成。反过来（先退再挂）就没人挂了。
-2. **不要在更新线程里直接退出进程**：更新很可能不在主线程。库不碰进程生命周期（AGENT.md §4.12），「退出」是宿主的事 —— 请把 `PendingRestart` 变成信号交给主循环，由主线程按自己的顺序保存状态、关窗、退出。
+2. **不要在更新线程里直接退出进程**：更新很可能不在主线程。库不碰进程生命周期，「退出」是宿主的事 —— 请把 `PendingRestart` 变成信号交给主循环，由主线程按自己的顺序保存状态、关窗、退出。
 3. **不要重定向 applier 的 stdio**（`BuildApplyCommand` 已不带重定向）：管道会随宿主退出而失效，applier 写日志就会出错。
 4. **别把 applier 放进带 `KILL_ON_JOB_CLOSE` 的 Job Object**，否则宿主一退它被一起杀（**子进程默认继承作业成员身份**）。先确认宿主到底有没有这种作业 —— 自写启动器通常没有（代码里不出现 `CreateJobObject` 就没有）。真有的话，可靠解是**换掉"创建者"**：计划任务、WMI `Win32_Process.Create`（由服务创建，天然在作业外）、或 `explorer.exe <路径>`。
    **别指望 `UseShellExecute = true`**：它**不保证**脱离作业，代价却是失去 .NET 的正确参数转义（`UseShellExecute=true` 时 `ArgumentList` 不能用，得自己拼命令行 —— 我们的路径又长、又带空格和中文），还可能出现控制台窗口。不值当。
 5. **落地要树静默**：宿主退出时别留下还在树里跑的进程（托盘、helper、mod 工具都算）。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。
-6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行按 AGENT.md §12.6 续做；最坏是「这次没生效」，不会「半个版本」。
+6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行会自动续做；最坏是「这次没生效」，不会「半个版本」。
 7. **离线也能落地**：阶段一把远端清单原文留在缓存里，applier 用它校验暂存内容，**落地阶段零网络**；缓存不在才联网重取，那条路上顺手拿到 ETag 并写下来。用缓存离线落地时拿不到 ETag 就不写 —— 下一轮做一次完整 GET，无害。
 8. **两种模式互斥**：存在待提交计划时，`InPlace` 会被拒（`reason=pending_staged_apply`）。
 9. **回退窗口**：落地后 `old/` 留着上一版备份，到**下一轮暂存开始时**（且上次已落地）自动清掉。

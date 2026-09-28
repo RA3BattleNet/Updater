@@ -32,7 +32,7 @@
 
 **已经验证过的**：内容寻址协议与清单格式、增量 / 补丁 / 纯改名 / 回落的正确性、
 中断续做、暂存更新的两个阶段（含 Cloudflare R2 真机端到端）、宿主身份判定、路径信任边界。
-验收条目与实测数字见 `AGENT.md` §2，测试怎么跑见 `Updater_Csharp/README.md` §6。
+测试怎么跑、验收覆盖到哪些条目，见 `Updater_Csharp/README.md` §6。
 
 **还没验证 / 明确不做的**：
 
@@ -89,7 +89,4 @@ dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release Stage
 | `Updater_Csharp/README.md` | **接入方主文档**：客户端引用与用法、宿主集成（§2.8）、发布流水线、协议、测试、部署与 CDN 要求 |
 | `Updater_Csharp/Ra3.BattleNet.Updater.XmlGenerator/README.md` | 清单生成壳：UUID 四条来路与自动关联规则、自检报告怎么读 |
 | `Updater_Csharp/Ra3.BattleNet.Updater.Server.PatchGenerator/README.md` | 补丁生成壳：hdiffz 参数取舍、`--compress-files` 为什么默认关 |
-| `AGENT.md`（仓库根，**未纳入版本管理**） | 甲方规格书：目标 / 验收条目 / 协议 / 落地策略，以及全部「必须 / 禁止」条目 —— 与其它文档冲突时**以它为准** |
 
-> `AGENT.md` 在工作区里存在但被 `.gitignore` 排除（历史约定），所以克隆仓库后看不到它；
-> 需要时向维护者索取。

@@ -1,7 +1,7 @@
 # Ra3.BattleNet.Updater.Server.PatchGenerator
 
 服务端发布流水线的壳：从一个新版本清单 + 若干基线清单，生成**纯静态**的服务端文件树
-（AGENT.md §5.3 / §5.4）。业务逻辑在 `Ra3.BattleNet.Updater.Server.PatchGenerator` 库侧
+。业务逻辑在 `Ra3.BattleNet.Updater.Server.PatchGenerator` 库侧
 （`PatchGenerator` 类），本壳只解析参数、调库、打印摘要。
 
 ## 用法
@@ -44,7 +44,7 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
 ## `--compress-files`：`files/{md5}.bin.gz` 预压缩旁挂（**默认关闭**）
 
 - **客户端目前不消费它。** 客户端只请求 `files/{md5}.bin`；那条"优先取 `.gz` 并自己解压"的分支
-  已按决策**删除**（协议描述保留在 AGENT.md §4.6，将来要用时照规范重新实现）。
+  已按决策**删除**（将来要用时按同样的协议重新实现：客户端优先取 `.gz`、自己解压）。
 - 因此打开这个开关**不会**让任何客户端省一个字节，只会带来：
   - 发布期 CPU（给每个文件压一遍）；
   - 约 **+46% 存储**（实测 1144.8 MiB → 526.3 MiB 的旁挂）；
@@ -65,7 +65,7 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
   给 Linux 发布机，`win-x86` 给 32 位宿主（官方 v5.1.3 没有 windows32 资产，随包的是 **v4.8.0**）。
   其他平台请自行放入 `hdiffpatch_bin/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
 
-相关：`XmlGenerator/README.md`（清单生成与"猜改名"）、`AGENT.md` §5.3 / §7.1。
+相关：`XmlGenerator/README.md`（清单生成与"猜改名"）、仓库 `README.md`（总览与文档地图）。
 ---
 
 > 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）
