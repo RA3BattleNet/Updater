@@ -30,7 +30,7 @@
 ### 2.1 怎么引用
 
 - `ProjectReference` 或直接引用 DLL：**`Ra3.BattleNet.Updater.Client`**（TFM `net10.0`）。
-- **外部工具必须随产物部署**：`hdiffpatch_bin/{win-x64,linux-x64}/{hdiffz,hpatchz}`。
+- **外部工具必须随产物部署**：`hdiffpatch_bin/{win-x64,win-x86,linux-x64}/{hdiffz,hpatchz}`（32 位宿主见 §7）。
   默认从**程序自身目录**找（`UpdateConfig.ToolsDir` 可改）；`Share` 项目会自动把它们复制到输出目录。
 - 除框架外**没有第三方依赖**（客户端链路只用到 `Share` 的工具封装与模型）。
 
@@ -136,10 +136,12 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
   --local-manifest <路径>   --cache-dir <目录>   --tools-dir <目录>   --log <路径>
   --exclude <列表>          --fallback <列表>    --concurrency <N>
   --threshold-files <N>     --threshold-ratio <R>  --verify-unchanged   --json
+  --apply-mode <模式>       inplace（默认，就地替换）/ staged（只暂存，宿主退出后由 applier 落地）
 ```
 
-退出码：`0` 已最新或已更新 ｜ `3` 已暂存待落地（暂存模式）｜ `1` 需要完整包 / 失败 ｜ `2` 参数或配置错误。
-加 `--json` 只输出一行结构化结果（字段同 §2.3，另含 `Ms`）。
+退出码：`0` 已最新或已更新 ｜ `1` 需要完整包 / 失败 ｜ `2` 参数或配置错误 ｜ `3` 已暂存待落地（暂存模式，宿主要退出）。
+加 `--json` 只输出一行结构化结果。**字段集由库定义**（`UpdateResult.ToJson()`，只增不改）：§2.3 的全部字段 + `Applied` / `PendingRestart` + `Ms`。
+壳只要读这行就够了 —— `PendingRestart` 就是"该重启"这个信号，不必靠猜退出码。
 
 暂存更新（`--apply-mode staged`）模式下，**落地由另一次 `--apply` 调用完成**（宿主退出后跑；
 库不自己 spawn 进程，见 AGENT.md §12.5）：
@@ -214,6 +216,8 @@ if (r.PendingRestart)
 7. **离线也能落地**：阶段一把远端清单原文留在缓存里，applier 用它校验暂存内容，**落地阶段零网络**；缓存不在才联网重取，那条路上顺手拿到 ETag 并写下来。用缓存离线落地时拿不到 ETag 就不写 —— 下一轮做一次完整 GET，无害。
 8. **两种模式互斥**：存在待提交计划时，`InPlace` 会被拒（`reason=pending_staged_apply`）。
 9. **回退窗口**：落地后 `old/` 留着上一版备份，到**下一轮暂存开始时**（且上次已落地）自动清掉。
+10. **applier 不负责重启宿主**：落地完成后没有任何人会把程序拉起来 —— 那是宿主的责任（外层启动器 / 计划任务 / 让用户再点一次）。要 applier 代劳得另加开关。
+11. **启动 applier 之后就不要再开更新会话**：applier 一启动就持有更新锁，再跑一次会得到 `already_running`。
 
 ## 3. 服务端（发布流水线）
 

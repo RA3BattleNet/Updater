@@ -10,6 +10,7 @@
 - **文件身份 = UUID**：路径变了也认得出是同一个文件，于是改名也能打补丁、甚至 0 下载。
 - **失败不致命**：补丁缺失/打不上 → 静默回落完整下载；失败到阈值 → 交回宿主走整包；库不抛异常、不弹 UI。
 - **可观测**：每轮写 `update.log`（S/F/R 三种行），结构化结果里给内容字节、payload 与**真正上网的字节（wire）**。
+- **自更新可用（两种落地路线）**：默认 `InPlace` 就地替换；`ApplyMode.Staged` 把"换文件"推到**宿主退出之后**，由独立 applier **只做改名**提交 —— 阶段一一个字节都不动现有树，落地阶段 0 下载、失败则整树不动（AGENT.md §12、`Updater_Csharp/README.md` §2.8）。
 
 ## 仓库结构
 
@@ -31,7 +32,11 @@
 
 ```powershell
 dotnet build Updater_Csharp/Ra3.BattleNet.sln -c Release
-dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release   # 跑测试
+
+# 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径，见 AGENT.md §7.3）
+$env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
+dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release            # 全套
+dotnet run --project Updater_Csharp/Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑名字含 Staged 的
 ```
 
 完整的两版生成 → 发布 → 客户端更新的示例命令见 `Updater_Csharp/README.md` §5。
