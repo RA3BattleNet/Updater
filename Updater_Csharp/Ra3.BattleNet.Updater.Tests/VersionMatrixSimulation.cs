@@ -71,7 +71,7 @@ public class VersionMatrixSimulation
         Func<UpdateConfig, UpdateConfig>? tweak = null, CancellationToken ct = default,
         IProgress<UpdateProgress>? progress = null)
     {
-        var cfg = new UpdateConfig { RootPath = client, ManifestUrl = http.BaseUrl + "manifest.xml" };
+        var cfg = new UpdateConfig { RootPath = client, CacheDir = TestSupport.TestCacheDir(client), ManifestUrl = http.BaseUrl + "manifest.xml" };
         if (tweak is not null) cfg = tweak(cfg);
         return new ClientUpdater(cfg).Run(progress, ct);
     }
@@ -627,13 +627,17 @@ public class VersionMatrixSimulation
         Publish(5);
         var client = NewClient(name, 3);
 
-        var shell = Path.Combine(RepoRoot(), "Ra3.BattleNet.Updater.Client.Update",
-            "bin", "Release", "net10.0", "Ra3.BattleNet.Updater.Client.Update.dll");
+        var shell = Path.Combine(RepoRoot(), "Ra3.BattleNet.Updater.Client.CLI",
+            "bin", "Release", "net10.0", "Ra3.BattleNet.Updater.Client.CLI.dll");
         Assert.True(File.Exists(shell), $"找不到壳：{shell}");
 
         using var http = new TestHttpServer(ServerDir);
         var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (var a in new[] { shell, "--root", client, "--manifest-url", http.BaseUrl + "manifest.xml", "--json" })
+        // 缓存必须显式指向客户端目录：否则它会落到「系统临时目录 + 安装根指纹」，
+// 而本场景的客户端路径是稳定的 —— 上一轮留下的 manifest.etag 会让这次直接 304，
+// 场景就不再可重复了（缓存移出安装根之后，"删树"不再等于"清缓存"）。
+        foreach (var a in new[] { shell, "--root", client, "--manifest-url", http.BaseUrl + "manifest.xml",
+                     "--cache-dir", Path.Combine(client, "UpdaterCache"), "--json" })
             psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi)!;
@@ -660,11 +664,11 @@ public class VersionMatrixSimulation
             root.GetProperty("Detail").GetString() ?? string.Empty,
             root.GetProperty("HttpVersion").GetString() ?? string.Empty);
 
-        var extra = $"- **壳**：`dotnet Client.Update.dll --root … --manifest-url … --json`\n" +
+        var extra = $"- **壳**：`dotnet Client.CLI.dll --root … --manifest-url … --json`\n" +
                     $"- 退出码：{p.ExitCode}（约定 0 = 已最新或已更新）\n" +
                     $"- stdout：`{stdout.Trim()}`\n" +
                     (stderr.Trim().Length > 0 ? $"- stderr：`{stderr.Trim()}`\n" : string.Empty) +
-                    $"- 客户端产物日志：同目录 `update.log`（壳写自己的缓存目录）";
+                    $"- 客户端产物日志：同目录 `update.log`（缓存由 `--cache-dir` 显式指定，保证场景可重复）";
 
         Capture(name, "独立壳（§4.12）：退出码 0 + stdout 一行 JSON，且结果逐字节一致",
             client, real, diff.Text, BaselineBytes(3, 5), extra);

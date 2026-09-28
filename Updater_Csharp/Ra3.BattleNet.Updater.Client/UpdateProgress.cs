@@ -10,4 +10,7 @@ public static class UpdateStage
     public const string Patch = "patch";
     public const string Download = "download";
     public const string Done = "done";
+
+    /// <summary>暂存更新的落地阶段（applier，§12.5）。</summary>
+    public const string Apply = "apply";
 }

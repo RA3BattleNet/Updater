@@ -99,6 +99,22 @@ public sealed class Updater
 
         log.RunStart(DateTime.UtcNow.ToString("O"));
 
+        var staged = _cfg.ApplyMode == ApplyMode.Staged;
+
+        // §12.7：同一棵树上两种落地模式互斥。若存在待提交计划却走直接更新，
+        // 随后运行的 applier 会拿旧计划覆盖刚由直接模式换好的新文件 —— 必须拒绝。
+        var pendingStagedPlan = StageLayout.HasPendingPlan(_cfg.RootPath);
+
+        if (!staged && pendingStagedPlan)
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.PendingStagedApply,
+                $"检测到已暂存但未落地的更新（{StageLayout.DirName}/）：请先让宿主退出以完成落地，或删除该目录后重试");
+
+        // 暂存模式：**没有待提交计划时**，本轮开始前把上一轮的备份清掉
+        //（§12.7：回退窗口止于"下一次更新开始"）。有待提交计划时不清 ——
+        // 那份备份仍是它的回退材料，交给 applier 在落地时清。
+        if (staged && !pendingStagedPlan)
+            StageLayout.ClearOld(_cfg.RootPath);
+
         var etagPath = Path.Combine(cacheDir, "manifest.etag");
         var remotePath = Path.Combine(cacheDir, "manifest.remote.xml");
 
@@ -132,6 +148,16 @@ public sealed class Updater
             return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty, manifest.HttpVersion ?? string.Empty);
         }
 
+        // 暂存模式下目标版本变了 → 旧暂存内容作废（内容寻址，缓存里还在，重下代价≈0）；
+        // 不作废就会让 applier 拿着过时的 .new 去落地。版本没变则**续做**（见 AlreadyPlaced）。
+        if (staged)
+        {
+            var pendingPlan = StageLayout.LoadPlan(_cfg.RootPath);
+            if (pendingPlan is not null
+                && !string.Equals(pendingPlan.ManifestHash, remoteHash, StringComparison.OrdinalIgnoreCase))
+                StageLayout.Reset(_cfg.RootPath);
+        }
+
         ManifestModel remote;
         try
         {
@@ -141,6 +167,13 @@ public sealed class Updater
         {
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, ex.Message, manifest.HttpVersion ?? string.Empty);
         }
+
+        // manifest 是**远端数据**：由它派生出的相对路径必须落在安装根内（§4.14）。
+        // 在动任何东西之前拒绝 —— 一条越界路径就说明这份清单要么坏了、要么是恶意的。
+        if (PathSafety.FirstUnsafe(remote.Manifest.Files.Select(f => (string?)f.RelativePath())) is { } unsafePath)
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.PathEscape,
+                $"清单里有逃出安装根的路径（例：{unsafePath}）：整个更新拒绝执行",
+                manifest.HttpVersion ?? string.Empty);
 
         ManifestModel? local = null;
         var localCorrupt = false;
@@ -190,6 +223,8 @@ public sealed class Updater
         // 正确做法是**退化为按磁盘哈希校验**：命中就跳过。花 CPU，不花带宽（AGENT.md §4.10）。
         // 这个判断现在对所有"本次要动"的文件都生效（见下面的 LooksAlreadyUpdated）。
         var work = plan.Entries.ToList();
+        var pending = new List<PlanEntry>();
+
         for (var i = 0; i < work.Count; i++)
         {
             var e = work[i];
@@ -198,18 +233,29 @@ public sealed class Updater
             {
                 if (!Fs.Exists(e.TargetPath))
                 {
-                    work[i] = e with { Action = PlanAction.Full };
+                    e = e with { Action = PlanAction.Full };
+                    work[i] = e;
                     tally.Skip--;
+                    pending.Add(e);
                     continue;
                 }
 
                 if (_cfg.VerifyUnchangedFiles && !LooksAlreadyUpdated(e))
                 {
-                    work[i] = e with { Action = PlanAction.Full };
+                    e = e with { Action = PlanAction.Full };
+                    work[i] = e;
                     tally.Skip--;
+                    pending.Add(e);
                 }
 
                 continue;
+            }
+
+            // 改名条目的前身必须还在；不在就只能整份下。先在这里定性，好让待提交计划记的是**真实意图**。
+            if (e.Action == PlanAction.Move && (e.PredecessorPath is null || !Fs.Exists(e.PredecessorPath)))
+            {
+                e = e with { Action = PlanAction.Full };
+                work[i] = e;
             }
 
             // §4.3 步骤①：目标路径上**已经就是目标内容** → 跳过。
@@ -220,14 +266,21 @@ public sealed class Updater
             // 不查这一下，重跑就会把已经弄好的文件再完整下载一遍 —— 实测 v4→v5 中断后重跑
             // 多下 30%（373 MB vs 一次跑完 286 MB），F6 的"已完成的不重复下载"就不成立。
             // 代价只是对**本次要动的文件**各算一次哈希（未变文件不碰），远小于重下的带宽。
-            if (e.Action is PlanAction.Patch or PlanAction.Full && LooksAlreadyUpdated(e))
+            // 暂存模式下这一步同时就是**续做**：落地点是 UpdaterStage/new，已暂存好的内容会被认出来。
+            // 注意这里**不改 work 里的动作** —— 该文件仍然要进待提交计划，
+            // 否则"全部已暂存"的那一轮会写出一个空计划，applier 就没事可做了。
+            if (e.Action is PlanAction.Patch or PlanAction.Full && AlreadyPlaced(e))
             {
-                work[i] = e with { Action = PlanAction.Skip };
                 tally.Skip++;
+                continue;
             }
+
+            pending.Add(e);
         }
 
-        var pending = work.Where(e => e.Action != PlanAction.Skip).ToList();
+        // 提交阶段要处理的条目（= 原始计划里非 Skip 的那些，含"本轮已就绪、无需下载"的）。
+        // 暂存模式把它写成待提交计划；直接更新模式不用它（文件已经就地换好了）。
+        var toLand = work.Where(x => x.Action != PlanAction.Skip).ToList();
         var totalWork = pending.Count;
         var done = 0;
 
@@ -299,6 +352,31 @@ public sealed class Updater
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.IoError, detail);
         }
 
+        if (tally.Fail == 0 && staged)
+        {
+            // 暂存模式：**不写本地 manifest、不写 ETag** —— 那两件事挪到 applier 落地成功之后（§12.5）。
+            // 提前写会让下一次运行"计划器只比对两份 manifest"从而永远不再处理这些文件；
+            // ETag 提前写更会让下一次请求拿到 304、直接返回"已最新"：更新彻底不再发生，而且不报错。
+            var actions = toLand
+                .Select(e => new StagedAction(
+                    e.Target.RelativePath(),
+                    e.Target.MD5,
+                    e.Action == PlanAction.Move ? StagedActionKind.Move : StagedActionKind.Place,
+                    e.Action == PlanAction.Move && e.PredecessorPath is { } src
+                        ? Path.GetRelativePath(_cfg.RootPath, src).Replace('\\', '/')
+                        : null))
+                .OrderBy(a => a.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            StageLayout.SavePlan(_cfg.RootPath, new StagedPlan(remoteHash, actions));
+            StageLayout.PruneNewExcept(_cfg.RootPath,
+                actions.Where(a => a.Kind == StagedActionKind.Place).Select(a => a.RelativePath));
+
+            return Finish(log, tally, sw, UpdateOutcome.Staged, UpdateReasons.None,
+                $"已暂存 {actions.Count} 个动作到 {StageLayout.DirName}/：宿主退出后由 applier 落地，届时才生效",
+                manifest.HttpVersion ?? string.Empty);
+        }
+
         if (tally.Fail == 0)
         {
             // 全部成功才写本地 manifest，且**原样字节**（§3.4 / §4.5）
@@ -335,6 +413,30 @@ public sealed class Updater
         }
     }
 
+    /// <summary>本次要落地的东西应该放在哪：直接更新 = 目标路径；暂存更新 = UpdaterStage/new/…（§12.3）。</summary>
+    private string PlacePath(PlanEntry e) =>
+        _cfg.ApplyMode == ApplyMode.Staged
+            ? StageLayout.NewPath(_cfg.RootPath, e.Target.RelativePath())
+            : e.TargetPath;
+
+    /// <summary>
+    /// **落地点**上是否已经是目标内容。直接更新时等价于 <see cref="LooksAlreadyUpdated"/>；
+    /// 暂存更新时问的是 <c>UpdaterStage/new</c> —— 于是"上次跑到一半"天然续做，不重下（§12.5）。
+    /// </summary>
+    private bool AlreadyPlaced(PlanEntry e)
+    {
+        var path = PlacePath(e);
+        try
+        {
+            return Fs.Exists(path)
+                && string.Equals(Hashing.Md5File(path), e.Target.MD5, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private async Task<(PlanAction Action, int Status, string Reason, long Bytes, long Payload)> ProcessEntryAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, CancellationToken ct)
     {
@@ -342,6 +444,16 @@ public sealed class Updater
         {
             case PlanAction.Move:
             {
+                // 暂存模式：**一个字节都不动树**（§12.2①），这次改名交给 applier 在宿主退出后做（§12.4）。
+                // 前身此刻不在（与上面的预判之间有竞态）→ 本轮报失败、不写计划，下一轮重新规划。
+                if (_cfg.ApplyMode == ApplyMode.Staged)
+                {
+                    if (entry.PredecessorPath is { } s && Fs.Exists(s))
+                        return (PlanAction.Move, LogStatus.Ok, UpdateReasons.None, 0, 0);
+
+                    return (PlanAction.Move, LogStatus.IoError, UpdateReasons.NoLocal, 0, 0);
+                }
+
                 if (entry.PredecessorPath is { } src && Fs.Exists(src))
                 {
                     try
@@ -420,7 +532,7 @@ public sealed class Updater
             return (false, UpdateReasons.PatchFailed, bytes, payload);
         }
 
-        Fs.Place(outPath, entry.TargetPath);
+        Fs.Place(outPath, PlacePath(entry));
         return (true, UpdateReasons.None, bytes, payload);
     }
 
@@ -469,7 +581,7 @@ public sealed class Updater
 
             try
             {
-                Fs.Place(blob, entry.TargetPath);
+                Fs.Place(blob, PlacePath(entry));
             }
             catch (Exception ex)
             {

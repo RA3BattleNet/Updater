@@ -61,7 +61,11 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
   只会"永远不命中补丁、永远完整下载"，所以规范与测试各钉了一次。
 - **补丁不小于目标文件就弃用**（生成后比较大小），客户端随后自然 404 → 完整下载。
 - 生成后必须**校验补丁真的能把旧文件还原成新文件**（默认开启，`--no-verify` 才跳过）。
-- 外部工具只随包提供 **win-x64 / linux-x64**（`HdiffTool.ShippedRids`）；其他平台请自行放入
-  `hdiffpatch_bin/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
+- 外部工具随包提供 **win-x64 / win-x86 / linux-x64**（`HdiffTool.ShippedRids`）：x64 是主场，`linux-x64`
+  给 Linux 发布机，`win-x86` 给 32 位宿主（官方 v5.1.3 没有 windows32 资产，随包的是 **v4.8.0**）。
+  其他平台请自行放入 `hdiffpatch_bin/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
 
 相关：`XmlGenerator/README.md`（清单生成与"猜改名"）、`AGENT.md` §5.3 / §7.1。
+---
+
+> 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）

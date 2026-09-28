@@ -62,6 +62,15 @@ internal static class TestSupport
         }
     }
 
+    /// <summary>
+    /// 测试约定：缓存与日志**显式**落在「安装根下的 UpdaterCache」（等价于历史默认值）。
+    /// 默认值已改为「系统临时目录 / LocalApplicationData + 安装根指纹」（AGENT.md §12.3）：
+    /// 测试若依赖默认值，每跑一轮都会在系统的临时目录里留下一个指纹目录，
+    /// 而断言日志前还得先自己算一遍指纹。所以测试一律显式给 CacheDir，把清理留在测试自己手里。
+    /// </summary>
+    public static string TestCacheDir(string clientRoot) =>
+        System.IO.Path.Combine(clientRoot, "UpdaterCache");
+
     public static ManifestModel NewManifest(string version = "1.0.0")
         => new(new Version(version), "test");
 

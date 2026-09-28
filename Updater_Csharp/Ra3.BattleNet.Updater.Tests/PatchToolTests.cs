@@ -101,6 +101,7 @@ public class PatchToolTests
             var result = new ClientUpdater(new UpdateConfig
             {
                 RootPath = client,
+                CacheDir = TestSupport.TestCacheDir(client),
                 ManifestUrl = http.BaseUrl + "manifest.xml",
             }).Run();
 

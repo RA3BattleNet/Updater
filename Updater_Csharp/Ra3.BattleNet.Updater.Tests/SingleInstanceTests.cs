@@ -20,6 +20,7 @@ public class SingleInstanceTests
         var cfg = new UpdateConfig
         {
             RootPath = root,
+            CacheDir = TestSupport.TestCacheDir(root),
             // 故意给一个连不上的地址：如果没被锁挡住，这里会去联网并返回别的错误
             ManifestUrl = "http://127.0.0.1:1/manifest.xml",
         };

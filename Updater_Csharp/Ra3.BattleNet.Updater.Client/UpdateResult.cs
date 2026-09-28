@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>更新会话的结果类型（AGENT.md §4.12：宿主只需一个 switch）。</summary>
@@ -15,6 +17,12 @@ public enum UpdateOutcome
     /// 本库协议里的「完整」只指 <c>files/{md5}.bin</c> 这种单个完整文件。
     /// </summary>
     NeedsHostFallback,
+
+    /// <summary>
+    /// 暂存模式阶段一成功：内容已全部暂存就绪，**但还没落地**（AGENT.md §12.7）。
+    /// 宿主应当提示用户退出/重启，届时 applier 才把它换上去。
+    /// </summary>
+    Staged,
 
     /// <summary>**意外**：网络 / 磁盘 / 权限等导致的失败。</summary>
     Failed,
@@ -39,8 +47,42 @@ public sealed record UpdateResult(
     long WireSentBytes = 0,
     long WireReceivedBytes = 0)
 {
-    /// <summary>宿主是否可以跳过自己原有的更新逻辑。</summary>
-    public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated;
+    /// <summary>
+    /// 宿主是否可以跳过自己原有的更新逻辑。
+    /// 注意 <see cref="UpdateOutcome.Staged"/> 也算：库这边该做的都做完了（内容已就绪、会在宿主退出后落地），
+    /// 宿主**不该**因此回退到自己的整包更新流程。要区别对待的话看 <see cref="PendingRestart"/>。
+    /// </summary>
+    public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated or UpdateOutcome.Staged;
+
+    /// <summary>已就绪但尚未生效，需要宿主退出/重启后才落地（暂存模式）。</summary>
+    public bool PendingRestart => Outcome is UpdateOutcome.Staged;
+
+    /// <summary>
+    /// 一行 JSON 结果 —— 机器可读的稳定契约（字段只增不改）。
+    /// 独立进程壳（宿主不是 C#）与 CI 都读它；<see cref="Applied"/> /
+    /// <see cref="PendingRestart"/> 必须在里面，否则壳只能靠退出码猜。
+    /// </summary>
+    public string ToJson() => JsonSerializer.Serialize(new
+    {
+        Outcome = Outcome.ToString(),
+        Reason,
+        Detail,
+        HttpVersion,
+        Applied,
+        PendingRestart,
+        Total,
+        Skipped,
+        Moved,
+        Patched,
+        Full,
+        FailedCount,
+        BytesDownloaded,
+        PayloadBytes,
+        WireBytes,
+        WireSentBytes,
+        WireReceivedBytes,
+        Ms = (long)Elapsed.TotalMilliseconds,
+    });
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
@@ -82,4 +124,22 @@ public static class UpdateReasons
 
     /// <summary>已有另一个更新实例在运行（AGENT.md §4.9）。</summary>
     public const string AlreadyRunning = "already_running";
+
+    /// <summary>
+    /// 本机上存在**已暂存但未落地**的更新，而本次要求走直接更新模式（AGENT.md §12.7）。
+    /// 必须拒绝：否则随后运行的 applier 会拿旧计划覆盖刚由直接模式换好的新文件。
+    /// </summary>
+    public const string PendingStagedApply = "pending_staged_apply";
+
+    /// <summary>远端清单已变，待提交计划对应的版本不是当前远端版本（§12.5）：本轮不落地，等下一次更新重新规划。</summary>
+    public const string StagedPlanStale = "staged_plan_stale";
+
+    /// <summary>暂存内容缺失或哈希不符：**整体不落地**（也不写本地清单），等下一次更新补齐。</summary>
+    public const string StagedContentMissing = "staged_content_missing";
+
+    /// <summary>等到时限仍有进程在使用这棵树（§12.5 的静默判据）：本轮不落地，什么都不动。</summary>
+    public const string TreeBusy = "tree_busy";
+
+    /// <summary>清单 / 计划里出现了逃出安装根的路径（绝对路径、盘符、`..`、UNC、`\\?\` 注入）：整个更新拒绝执行。</summary>
+    public const string PathEscape = "path_escape";
 }

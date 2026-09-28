@@ -101,7 +101,8 @@ v5:  dotnet\shared\Microsoft.NETCore.App\10.0.5\System.Private.CoreLib.dll   14.
 
 所以最坏的结果是：白跑一次 hdiffz + 客户端多一次往返（探测补丁 404 或校验失败），
 **不会写坏文件，也不会让更新失败**。这也是为什么敢默认把它做成"一个开关"而不是
-"必须人工逐条确认"——但开关**默认是关的**，因为它是全流程里唯一带猜测的一步。
+"必须人工逐条确认"——它**默认开启**（`--no-auto-link-uuids` 可关），因为它是全流程里唯一带猜测的一步，
+所以必须留一个一键退路；真正的兜底是下面那两道校验，不是"默认关"。
 
 ## 报告里能看到什么
 
@@ -137,4 +138,6 @@ v5:  dotnet\shared\Microsoft.NETCore.App\10.0.5\System.Private.CoreLib.dll   14.
 - 规范：`AGENT.md` §5.1（UUID 继承两条规则）、§5.2（生成期自检）、§3.4（版本身份 vs 文件身份）
 - 实测数据与场景矩阵：`增量更新器/_sim/analysis.md`（S16 / S17 / S20 三个场景）
 - 客户端侧为什么"配错也没事"：`AGENT.md` §4.3 ⑤、§5.3
+---
 
+> 返回总览：[仓库入口 `README.md`](../../README.md) · 接入用法：[`Updater_Csharp/README.md`](../README.md)（客户端库 + 宿主集成）
