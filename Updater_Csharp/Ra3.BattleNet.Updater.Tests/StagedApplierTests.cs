@@ -259,6 +259,58 @@ public class StagedApplierTests
 
     // ============================================================ 静默判据
 
+    [Fact]
+    public void Apply_OnSuccess_LaunchesTheHostAgain()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        var marker = Path.Combine(tmp.Path, "restarted.txt");
+        var cfg = Cfg(e) with
+        {
+            RestartAfterApply = true,
+            RestartExecutable = "cmd.exe",
+            RestartArguments = $"/c echo ok > \"{marker}\"",
+            RestartDelay = TimeSpan.Zero,
+        };
+
+        var applied = new StagedApplier(cfg).Run();
+
+        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
+        AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);          // 先落地，再拉起宿主
+        Assert.Contains("已拉起宿主", applied.Detail);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!File.Exists(marker) && sw.Elapsed < TimeSpan.FromSeconds(15)) Thread.Sleep(50);
+        Assert.True(File.Exists(marker), "落地成功之后应当把宿主拉起来");
+    }
+
+    [Fact]
+    public void Apply_WhenNothingWasLanded_DoesNotLaunchTheHost()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        var marker = Path.Combine(tmp.Path, "restarted-never.txt");
+        var cfg = Cfg(e) with
+        {
+            RestartAfterApply = true,
+            RestartExecutable = "cmd.exe",
+            RestartArguments = $"/c echo ok > \"{marker}\"",
+            RestartDelay = TimeSpan.Zero,
+        };
+
+        var result = new StagedApplier(cfg).Run();             // 没有待提交计划 → 什么都没落地
+
+        Assert.NotEqual(UpdateOutcome.Updated, result.Outcome);
+        Thread.Sleep(600);
+        Assert.False(File.Exists(marker), "没落地成功就不该拉起宿主");
+    }
+
     /// <summary>把服务端清单里的 <Path> 全换成逃逸值（模拟被篡改 / 损坏的远端清单）。</summary>
     private static void TamperPath(Env e, string value)
     {

@@ -68,6 +68,10 @@ internal static class Program
         int? waitForPid = null;
         string? waitForName = null;
         long? waitForStart = null;
+        string? restartExe = null;
+        string? restartArgs = null;
+        string? restartCwd = null;
+        var restartDelaySeconds = 1;
         var quiescenceSeconds = 600;
         var pollSeconds = 2;
         // 保险丝默认**关闭**（AGENT.md §4.4 / Q4）：变更文件多正是增量该发挥作用的场景。
@@ -96,6 +100,10 @@ internal static class Program
                 case "--wait-for-pid": waitForPid = int.Parse(Next(args, ref i)); break;
                 case "--wait-for-name": waitForName = Next(args, ref i); break;
                 case "--wait-for-start": waitForStart = long.Parse(Next(args, ref i)); break;
+                case "--restart": restartExe = Next(args, ref i); break;
+                case "--restart-args": restartArgs = Next(args, ref i); break;
+                case "--restart-cwd": restartCwd = Next(args, ref i); break;
+                case "--restart-delay": restartDelaySeconds = int.Parse(Next(args, ref i)); break;
                 case "--quiescence-timeout": quiescenceSeconds = int.Parse(Next(args, ref i)); break;
                 case "--poll-seconds": pollSeconds = int.Parse(Next(args, ref i)); break;
                 case "--json": break;
@@ -125,6 +133,12 @@ internal static class Program
             WaitForProcessId = waitForPid,
             WaitForProcessName = waitForName,
             WaitForProcessStartTicks = waitForStart,
+            // CLI 里出现 --restart 就是"要重启"，不必再要一个开关
+            RestartAfterApply = restartExe is not null,
+            RestartExecutable = restartExe,
+            RestartArguments = restartArgs,
+            RestartWorkingDirectory = restartCwd,
+            RestartDelay = TimeSpan.FromSeconds(Math.Max(0, restartDelaySeconds)),
             ApplierQuiescenceTimeout = TimeSpan.FromSeconds(Math.Max(1, quiescenceSeconds)),
             ApplierPollInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds)),
         };
@@ -170,5 +184,8 @@ internal static class Program
         Console.WriteLine("  --wait-for-start <ticks>  宿主的启动时刻，唯一实例标识（后两个由 BuildApplyCommand 自动填，宿主不用管）");
         Console.WriteLine("  --quiescence-timeout <秒> --apply 时等树静的时限（默认 600）");
         Console.WriteLine("  --poll-seconds <秒>       --apply 时的轮询间隔（默认 2）");
+        Console.WriteLine("  --restart <exe>           落地成功后把宿主拉起来（可选；宿主一般用 BuildApplyCommand 自动带上）");
+        Console.WriteLine("  --restart-args <原文>     原样传回宿主的参数（原始命令行去掉 exe 那段的原文，引号不重新解释）");
+        Console.WriteLine("  --restart-cwd <目录>      宿主的工作目录       --restart-delay <秒>  拉起前等待（默认 1）");
     }
 }

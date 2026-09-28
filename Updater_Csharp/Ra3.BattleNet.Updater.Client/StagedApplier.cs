@@ -45,18 +45,53 @@ public sealed class StagedApplier
                 TimeSpan.Zero, "已有另一个更新实例在运行");
         }
 
+        UpdateResult result;
         using (lockStream)
         {
             try
             {
                 using var fetcher = new HttpFetcher(_cfg.MaxConcurrency);
                 _fetcher = fetcher;
-                return await CoreAsync(progress, ct).ConfigureAwait(false);
+                result = await CoreAsync(progress, ct).ConfigureAwait(false);
             }
             finally
             {
                 _fetcher = null;
             }
+        }
+
+        // 必须**在锁释放之后**才拉起宿主：否则刚起来的宿主第一件事跑更新就会拿到 already_running（§12.5）。
+        if (result.Outcome is not UpdateOutcome.Updated) return result;
+
+        if (RestartHostIfRequested() is { } note)
+            result = result with { Detail = result.Detail.Length == 0 ? note : result.Detail + "；" + note };
+
+        return result;
+    }
+
+    /// <summary>
+    /// 落地成功后把宿主拉起来（§12.5）。**只在真正落地成功（<see cref="UpdateOutcome.Updated"/>）时**执行；
+    /// 启动失败不影响落地结果，只把原因并进 <c>Detail</c>（不吞错，也不谎报成功）。
+    /// 用 <c>UseShellExecute = true</c>：脱离宿主可能存在的 Job Object、并落在交互式桌面上。
+    /// </summary>
+    private string? RestartHostIfRequested()
+    {
+        if (!_cfg.RestartAfterApply || string.IsNullOrWhiteSpace(_cfg.RestartExecutable)) return null;
+
+        try
+        {
+            if (_cfg.RestartDelay > TimeSpan.Zero) Thread.Sleep(_cfg.RestartDelay);
+
+            var psi = new ProcessStartInfo(_cfg.RestartExecutable!) { UseShellExecute = true };
+            if (!string.IsNullOrEmpty(_cfg.RestartArguments)) psi.Arguments = _cfg.RestartArguments;
+            if (!string.IsNullOrEmpty(_cfg.RestartWorkingDirectory)) psi.WorkingDirectory = _cfg.RestartWorkingDirectory;
+
+            Process.Start(psi);
+            return "已拉起宿主";
+        }
+        catch (Exception ex)
+        {
+            return "拉起宿主失败（不影响本次落地）：" + ex.Message;
         }
     }
 
@@ -428,6 +463,11 @@ public sealed class StagedApplier
                      ("--wait-for-pid", Environment.ProcessId.ToString()),
                      ("--wait-for-name", SelfProcessName()),
                      ("--wait-for-start", SelfStartTicks()),
+                     // 只有宿主显式打开开关才带这些；打开后宿主自己的 exe 与原始参数**原文**由这里自动填
+                     ("--restart", _RestartExe(cfg)),
+                     ("--restart-args", _RestartArgs(cfg)),
+                     ("--restart-cwd", _RestartCwd(cfg)),
+                     ("--restart-delay", cfg.RestartAfterApply ? ((int)cfg.RestartDelay.TotalSeconds).ToString() : null),
                      ("--quiescence-timeout", ((int)cfg.ApplierQuiescenceTimeout.TotalSeconds).ToString()),
                  })
         {
@@ -437,6 +477,41 @@ public sealed class StagedApplier
         }
 
         return psi;
+    }
+
+    private static string? _RestartExe(UpdateConfig cfg) =>
+        cfg.RestartAfterApply ? (cfg.RestartExecutable ?? Environment.ProcessPath) : null;
+
+    private static string? _RestartArgs(UpdateConfig cfg) =>
+        cfg.RestartAfterApply ? (cfg.RestartArguments ?? SelfCommandLineTail()) : null;
+
+    private static string? _RestartCwd(UpdateConfig cfg) =>
+        cfg.RestartAfterApply ? (cfg.RestartWorkingDirectory ?? Environment.CurrentDirectory) : null;
+
+    /// <summary>
+    /// 宿主原始命令行里**去掉 exe 那一段之后的原文** —— 引号原封不动，我们不做任何重新解释。
+    /// 开头既可能是带引号的路径，也可能是裸路径，两种都剥掉。
+    /// </summary>
+    private static string? SelfCommandLineTail()
+    {
+        var line = Environment.CommandLine;
+        if (string.IsNullOrEmpty(line)) return null;
+
+        int cut;
+        if (line[0] == '"')
+        {
+            cut = line.IndexOf('"', 1);
+            if (cut < 0) return null;
+            cut++;
+        }
+        else
+        {
+            cut = line.IndexOf(' ');
+            if (cut < 0) return null;
+        }
+
+        var tail = line[cut..].Trim();
+        return tail.Length == 0 ? null : tail;
     }
 
     // 「我是谁」由宿主这一侧填好交下去 —— PID 会被复用，光凭 PID 认不准（见 HostExited）。

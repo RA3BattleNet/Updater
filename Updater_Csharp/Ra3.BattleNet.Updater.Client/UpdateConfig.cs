@@ -31,6 +31,28 @@ public sealed record UpdateConfig
     /// </summary>
     public long? WaitForProcessStartTicks { get; init; }
 
+    /// <summary>
+    /// 落地**成功之后**把宿主拉起来（§12.5）。默认关 —— 这是行为改变，必须由宿主显式开。
+    /// 用 <c>StagedApplier.BuildApplyCommand</c> 时，只要把这个开关打开，
+    /// 宿主自己的可执行文件与**原始参数原文**会被自动填好，宿主侧不需要别的代码。
+    /// </summary>
+    public bool RestartAfterApply { get; init; }
+
+    /// <summary>要拉起的可执行文件；<c>BuildApplyCommand</c> 会自动填成当前进程（即宿主自己）。</summary>
+    public string? RestartExecutable { get; init; }
+
+    /// <summary>
+    /// 原样传给宿主的参数 —— 是宿主**原始命令行里去掉 exe 那一段的原文**，所以引号不会被我们重新解释
+    /// （自己拼引号是这类功能最常见的翻车点）。
+    /// </summary>
+    public string? RestartArguments { get; init; }
+
+    /// <summary>宿主的工作目录；不给就沿用 applier 的当前目录。</summary>
+    public string? RestartWorkingDirectory { get; init; }
+
+    /// <summary>拉起前的等待，默认 1 秒（给系统收尾和文件句柄释放留一点余量）。</summary>
+    public TimeSpan RestartDelay { get; init; } = TimeSpan.FromSeconds(1);
+
     /// <summary>applier 等待"树静默"的总时限（§12.5）：超时即整轮不落地，什么都不动。</summary>
     public TimeSpan ApplierQuiescenceTimeout { get; init; } = TimeSpan.FromMinutes(10);
 

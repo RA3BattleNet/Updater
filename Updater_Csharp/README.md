@@ -238,7 +238,7 @@ if (r.PendingRestart)
 | 宿主在带 `KILL_ON_JOB_CLOSE` 的 **Job Object** 里 | applier 会被宿主退出**连带杀掉**，本库不处理。自写启动器通常没有这种作业（代码里不出现 `CreateJobObject` 就没有）。真有的话，换掉"创建者"：计划任务 / WMI `Win32_Process.Create` / `explorer.exe <路径>`。**别指望 `UseShellExecute = true`**（不保证脱离，还会丢掉参数转义） |
 | 宿主**托盘常驻**、"关窗口不退出进程" | applier 等不到树静默 → `tree_busy`。宿主必须保证"用户点了关闭，进程真的退" |
 | 安装根对当前用户**不可写** | **阶段一就会失败**（`UpdaterStage/` 写在安装根下）。要么宿主提权运行，要么安装期放宽 ACL / 装到可写位置 |
-| 想让 applier **代替宿主重启** | 本版没有这个开关，落地后要由宿主自己的外层机制（启动器 / 计划任务）拉起 |
+| ~~想让 applier 代替宿主重启~~ | **现在有了**（可选，默认关）—— 见下面的「落地后自动拉起宿主」 |
 
 #### 宿主的义务（后面用这个库的人必须照做）
 
@@ -246,6 +246,33 @@ if (r.PendingRestart)
 2. **退出动作放在主线程的关闭序列里**（更新线程只发信号），不要用 `Environment.Exit` 代替宿主的清理。
 3. **推荐直接强制重启**：暂存好后告诉用户"需要重启完成更新"，不给"稍后"选项 —— 用户确认 → 挂 applier → 退出，`tree_busy` / 白等超时这些问题都不会出现。
 4. **如果一定要给"稍后"**：用户选稍后时立刻 `Kill()` 掉已挂起的 applier（见要点 14），并且**把"挂 applier"推迟到关闭序列的最后一刻**（别在用户确认之前挂）。
+
+#### 落地后自动拉起宿主（可选，默认关）
+
+```csharp
+var cfg = new UpdateConfig
+{
+    RootPath = installDir,
+    ManifestUrl = manifestUrl,
+    ApplyMode = ApplyMode.Staged,
+    RestartAfterApply = true,                        // 只开这一个开关就够了
+};
+Process.Start(StagedApplier.BuildApplyCommand(applierExePath, cfg));
+```
+
+`BuildApplyCommand` 是在**宿主进程里**执行的，所以它自动填好三样：要拉起的 exe（宿主自己）、
+**原始参数原文**（`Environment.CommandLine` 去掉 exe 那一段，引号原封不动、我们不做任何重新解释）、
+以及工作目录。要换成别的命令就显式给 `RestartExecutable` / `RestartArguments` / `RestartWorkingDirectory`。
+
+顺序与语义（都有测试守着）：
+
+- **只在落地真正成功（`Updated`）之后**才拉起；没落地成功一次都不会拉。
+- **在释放更新锁之后**才拉起 —— 否则刚起来的宿主第一件事跑更新就会拿到 `already_running`。
+- 拉起前默认等 1 秒（`RestartDelay`），给系统收尾留一点余量。
+- 用 `UseShellExecute = true`（脱离宿主可能存在的 Job Object、落在交互式桌面）。
+  启动失败**不影响落地结果**，只把原因并进 `UpdateResult.Detail`（不吞错、也不谎报成功）。
+- **权限**：applier 若是提权跑的，它拉起的宿主**也是提权的**。要回到普通用户桌面得走
+  `explorer.exe <命令>` 或计划任务（limited token）。
 
 ## 3. 服务端（发布流水线）
 
