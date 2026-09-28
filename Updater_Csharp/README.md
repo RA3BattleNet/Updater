@@ -61,6 +61,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 |---|---|---|
 | `UpToDate` | 已是最新（1 次清单请求，命中 304 时 **0 字节**） | 直接启动 |
 | `Updated` | 更新成功，本地清单已更新 | 直接启动 |
+| `Staged` | 暂存模式阶段一成功：内容已就绪，**但还没落地**（宿主退出后由 applier 生效） | 提示用户退出/重启；**不要**回退到你自己的整包流程 |
 | `NeedsHostFallback` | **正常分支**：本地状态不可信 / 达到保护阈值（原因见 `Reason`+`Detail`） | 走你自己的整包逻辑（BT / 直链）；**这不是错误** |
 | `Failed` | 意外失败：网络 / 磁盘 / 权限 / 被取消 | 提示重试；`Detail` 里有原因 |
 
@@ -74,7 +75,8 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `PayloadBytes` | 从响应正文**读到的**字节（解压后；含清单与重试/续传各段） |
 | `WireBytes` / `WireSentBytes` / `WireReceivedBytes` | **真正上网的字节**（连接层计数，含 TLS/HTTP 头）——**做带宽统计用这一组** |
 | `Elapsed` / `HttpVersion` | 耗时 / 协商到的 HTTP 版本（如 `HTTP/2.0`） |
-| `Applied` | 便捷属性：`UpToDate` 或 `Updated` 时为 `true` |
+| `Applied` | 便捷属性：`UpToDate` / `Updated` / `Staged` 时为 `true`（库这边该做的都做完了） |
+| `PendingRestart` | `Staged` 时为 `true`：已就绪，需宿主退出/重启后才生效 |
 
 > 三个字节口径别混用：`BytesDownloaded` 是内容、`PayloadBytes` 是解压后正文、`WireBytes` 才是网线。
 > 实测同一次真实更新（v4→v5，35 请求）：内容 1.85 MiB、payload 1.86 MiB、**wire 1.89 MiB**。
@@ -91,6 +93,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | 项 | 默认 | 说明 |
 |---|---|---|
 | `RootPath` | **必填** | 安装根目录 |
+| `ApplyMode` | `InPlace` | 落地模式：`InPlace` 就地替换（会话内生效）；`Staged` 只暂存到 `<root>/UpdaterStage/`，由独立 applier 在宿主退出后落地（自更新必须走这条）。见 AGENT.md §12 |
 | `ManifestUrl` | **必填** | 远端清单地址 |
 | `LocalManifestPath` | `{RootPath}/manifest.xml` | 本地清单：**它的字节就是版本身份** |
 | `CacheDir` | `<系统临时目录>/updater-cache/<安装根指纹>` | 下载产物：`.part`（续传）、内容 blob（文件名 = 目标 MD5，平铺在缓存根）、补丁缓存、`manifest.etag` / `manifest.remote.xml`；**可随时清空**（最坏重下） |
@@ -135,7 +138,7 @@ Client.Update --root <安装目录> --manifest-url <清单地址> [选项]
   --threshold-files <N>     --threshold-ratio <R>  --verify-unchanged   --json
 ```
 
-退出码：`0` 已最新或已更新 ｜ `1` 需要完整包 / 失败 ｜ `2` 参数或配置错误。
+退出码：`0` 已最新或已更新 ｜ `3` 已暂存待落地（暂存模式）｜ `1` 需要完整包 / 失败 ｜ `2` 参数或配置错误。
 加 `--json` 只输出一行结构化结果（字段同 §2.3，另含 `Ms`）。
 
 ## 3. 服务端（发布流水线）

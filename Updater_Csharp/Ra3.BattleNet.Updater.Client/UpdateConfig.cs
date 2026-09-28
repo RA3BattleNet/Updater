@@ -11,6 +11,13 @@ public sealed record UpdateConfig
     /// <summary>安装根目录。</summary>
     public required string RootPath { get; init; }
 
+    /// <summary>
+    /// 落地模式（AGENT.md §12.1）。默认 <see cref="ApplyMode.InPlace"/>：
+    /// 会话内就地替换，全部成功即生效。选 <see cref="ApplyMode.Staged"/> 时只暂存到
+    /// <c>UpdaterStage</c>，由独立 applier 在宿主退出后落地 —— 自更新必须走这条路。
+    /// </summary>
+    public ApplyMode ApplyMode { get; init; } = ApplyMode.InPlace;
+
     /// <summary>远端 manifest 地址。</summary>
     public required string ManifestUrl { get; init; }
 

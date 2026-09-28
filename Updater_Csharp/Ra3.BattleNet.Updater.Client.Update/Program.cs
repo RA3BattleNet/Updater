@@ -6,7 +6,7 @@ namespace Ra3.BattleNet.Updater.Client.Update;
 
 /// <summary>
 /// 独立进程壳：跑一次更新并给出结构化结果（AGENT.md §4.12）。
-/// 退出码：0 = 已最新或已更新；1 = 需要完整包 / 失败；2 = 参数或配置错误。
+/// 退出码：0 = 已最新或已更新；3 = 已暂存待落地（暂存模式，宿主退出后生效）；1 = 需要完整包 / 失败；2 = 参数或配置错误。
 /// 原因另以一行 JSON 输出到 stdout。
 /// </summary>
 internal static class Program
@@ -72,6 +72,9 @@ internal static class Program
             Console.WriteLine(result.ToString());
         }
 
+        // 暂存模式：内容已就绪但**还没生效**，必须与"已更新"分开表达（AGENT.md §12.7）
+        if (result.Outcome == UpdateOutcome.Staged) return 3;
+
         return result.Applied ? 0 : 1;
     }
 
@@ -82,6 +85,7 @@ internal static class Program
         var fallback = new List<string>();
         var concurrency = 4;
         var verifyUnchanged = false;
+        var applyMode = ApplyMode.InPlace;
         // 保险丝默认**关闭**（AGENT.md §4.4 / Q4）：变更文件多正是增量该发挥作用的场景。
         // 这里原来是 500 / 0.30 —— 等于默认开启，会让"变更文件多"直接被判成需要完整包。
         var thresholdFiles = 0;
@@ -103,6 +107,7 @@ internal static class Program
                 case "--threshold-files": thresholdFiles = int.Parse(Next(args, ref i)); break;
                 case "--threshold-ratio": thresholdRatio = double.Parse(Next(args, ref i)); break;
                 case "--verify-unchanged": verifyUnchanged = true; break;
+                case "--apply-mode": applyMode = ParseApplyMode(Next(args, ref i)); break;
                 case "--json": break;
                 case "--help": ShowUsage(); Environment.Exit(0); break;
                 default: throw new ArgumentException($"未知参数：{args[i]}");
@@ -126,8 +131,16 @@ internal static class Program
             FullPackageThresholdFiles = thresholdFiles,
             FullPackageThresholdRatio = thresholdRatio,
             VerifyUnchangedFiles = verifyUnchanged,
+            ApplyMode = applyMode,
         };
     }
+
+    private static ApplyMode ParseApplyMode(string value) => value.ToLowerInvariant() switch
+    {
+        "inplace" or "in-place" or "direct" => ApplyMode.InPlace,
+        "staged" or "stage" => ApplyMode.Staged,
+        _ => throw new ArgumentException($"--apply-mode 只接受 inplace 或 staged（实得 {value}）"),
+    };
 
     private static IEnumerable<string> Split(string value) =>
         value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -145,12 +158,13 @@ internal static class Program
         Console.WriteLine("  --local-manifest <路径>   本地清单路径（默认 <root>/manifest.xml）");
         Console.WriteLine("  --cache-dir <目录>        缓存目录（默认 <系统临时目录>/updater-cache/<安装根指纹>）");
         Console.WriteLine("  --tools-dir <目录>        外部工具目录（默认程序目录）");
-        Console.WriteLine("  --log <路径>              日志路径（默认 <cache-dir>/update.log）");
+        Console.WriteLine("  --log <路径>              日志路径（默认 <cache-dir>/update.log；未指定 cache-dir 时用用户目录下的 updater-logs）");
         Console.WriteLine("  --exclude <列表>          不受管顶层目录，逗号分隔");
         Console.WriteLine("  --fallback <列表>         备用基准地址，逗号分隔");
         Console.WriteLine("  --concurrency <N>         并发上限（默认 4）");
         Console.WriteLine("  --threshold-files <N>     待下载文件数阈值（默认 0 = 关闭）");
         Console.WriteLine("  --threshold-ratio <R>     待下载文件数占比阈值（默认 0 = 关闭）");
+        Console.WriteLine("  --apply-mode <模式>       inplace（默认，就地替换）或 staged（只暂存，宿主退出后由 applier 落地）");
         Console.WriteLine("  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）");
         Console.WriteLine("  --json                    只输出一行 JSON 结果");
     }

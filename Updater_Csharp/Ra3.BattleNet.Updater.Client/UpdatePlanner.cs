@@ -57,6 +57,8 @@ public static class UpdatePlanner
     {
         var root = Path.GetFullPath(cfg.RootPath);
         var excluded = new HashSet<string>(cfg.ExcludedDirs.Select(Normalize), StringComparer.OrdinalIgnoreCase);
+        // 暂存区是库自己的工作目录（§12.3）：即便某个 manifest 误列了它，也绝不受管。
+        excluded.Add(Normalize(StageLayout.DirName));
 
         var byUuid = new Dictionary<Guid, ManifestFile>();
 

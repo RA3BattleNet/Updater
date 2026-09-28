@@ -16,6 +16,12 @@ public enum UpdateOutcome
     /// </summary>
     NeedsHostFallback,
 
+    /// <summary>
+    /// 暂存模式阶段一成功：内容已全部暂存就绪，**但还没落地**（AGENT.md §12.7）。
+    /// 宿主应当提示用户退出/重启，届时 applier 才把它换上去。
+    /// </summary>
+    Staged,
+
     /// <summary>**意外**：网络 / 磁盘 / 权限等导致的失败。</summary>
     Failed,
 }
@@ -39,8 +45,15 @@ public sealed record UpdateResult(
     long WireSentBytes = 0,
     long WireReceivedBytes = 0)
 {
-    /// <summary>宿主是否可以跳过自己原有的更新逻辑。</summary>
-    public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated;
+    /// <summary>
+    /// 宿主是否可以跳过自己原有的更新逻辑。
+    /// 注意 <see cref="UpdateOutcome.Staged"/> 也算：库这边该做的都做完了（内容已就绪、会在宿主退出后落地），
+    /// 宿主**不该**因此回退到自己的整包更新流程。要区别对待的话看 <see cref="PendingRestart"/>。
+    /// </summary>
+    public bool Applied => Outcome is UpdateOutcome.UpToDate or UpdateOutcome.Updated or UpdateOutcome.Staged;
+
+    /// <summary>已就绪但尚未生效，需要宿主退出/重启后才落地（暂存模式）。</summary>
+    public bool PendingRestart => Outcome is UpdateOutcome.Staged;
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
@@ -82,4 +95,10 @@ public static class UpdateReasons
 
     /// <summary>已有另一个更新实例在运行（AGENT.md §4.9）。</summary>
     public const string AlreadyRunning = "already_running";
+
+    /// <summary>
+    /// 本机上存在**已暂存但未落地**的更新，而本次要求走直接更新模式（AGENT.md §12.7）。
+    /// 必须拒绝：否则随后运行的 applier 会拿旧计划覆盖刚由直接模式换好的新文件。
+    /// </summary>
+    public const string PendingStagedApply = "pending_staged_apply";
 }
