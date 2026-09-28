@@ -259,6 +259,55 @@ public class StagedApplierTests
 
     // ============================================================ 静默判据
 
+    /// <summary>把服务端清单里的 <Path> 全换成逃逸值（模拟被篡改 / 损坏的远端清单）。</summary>
+    private static void TamperPath(Env e, string value)
+    {
+        var p = Path.Combine(e.Server, "manifest.xml");
+        var xml = File.ReadAllText(p);
+        File.WriteAllText(p, System.Text.RegularExpressions.Regex.Replace(
+            xml, "<Path>[^<]*</Path>", "<Path>" + value + "</Path>",
+            System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public void Update_WhenTheRemoteManifestHasAnEscapingPath_RefusesBeforeTouchingAnything()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        TamperPath(e, "..");
+
+        var result = new ClientUpdater(Cfg(e)).Run();
+
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+        Assert.Equal(UpdateReasons.PathEscape, result.Reason);
+        AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);            // 一个字节都没动
+        Assert.False(StageLayout.HasPendingPlan(e.Client));
+    }
+
+    [Fact]
+    public void Apply_WhenTheRemoteManifestHasAnEscapingPath_RefusesToLand()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        // 服务端清单换成带逃逸路径的版本，并删掉缓存迫使 applier 重取。
+        // 注意：这份清单的字节哈希与计划对不上 —— 但路径信任边界要在**谈计划新不新之前**就拦下。
+        TamperPath(e, "..");
+        File.Delete(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"));
+
+        var result = new StagedApplier(Cfg(e)).Run();
+
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+        Assert.Equal(UpdateReasons.PathEscape, result.Reason);
+        AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);
+        Assert.True(StageLayout.HasPendingPlan(e.Client));
+    }
+
     [Fact]
     public void Apply_WhenThePidWasRecycledToAnotherProcess_DoesNotWaitForIt()
     {

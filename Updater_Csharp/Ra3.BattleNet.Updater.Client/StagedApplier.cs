@@ -83,13 +83,23 @@ public sealed class StagedApplier
                 "取不到远端清单：拒绝落地（本地清单不会被改写，暂存内容原样保留）",
                 plan.Actions.Count, 0, 0, 0, httpVersion);
 
+        var remote = RemoteModel(remoteBytes);
+
+        // 清单是远端数据、计划由它派生：路径先过信任边界（§4.14），**再**谈计划新不新 ——
+        // 一份带逃逸路径的清单是"坏了或恶意"，不该和"计划过期"混为一谈。
+        var unsafePath = PathSafety.FirstUnsafe(
+            remote.Manifest.Files.Select(f => (string?)f.RelativePath()).Concat(
+                plan.Actions.SelectMany(a => new[] { a.RelativePath, a.MoveFromRelative })));
+        if (unsafePath is not null)
+            return Finish(log, sw, knownHash, UpdateOutcome.Failed, UpdateReasons.PathEscape,
+                $"清单或计划里有逃出安装根的路径（例：{unsafePath}）：拒绝落地",
+                plan.Actions.Count, 0, 0, 0, httpVersion);
+
         // 计划是**提示**：判据是"远端清单的字节哈希是否还等于计划里记的那个"（§12.4）。
         if (!string.Equals(remoteHash, plan.ManifestHash, StringComparison.OrdinalIgnoreCase))
             return Finish(log, sw, knownHash, UpdateOutcome.Failed, UpdateReasons.StagedPlanStale,
                 $"远端清单已变（计划 {Short(plan.ManifestHash)} / 远端 {Short(remoteHash)}）：本轮不落地，等下一次更新重新规划",
                 plan.Actions.Count, 0, 0, 0, httpVersion);
-
-        var remote = RemoteModel(remoteBytes);
 
         // 静默判据（§12.5）：宿主 PID 退出 + 树内没有进程在跑。超时就什么都不动。
         var quiet = await WaitForQuiescenceAsync(root, remote, progress, ct).ConfigureAwait(false);

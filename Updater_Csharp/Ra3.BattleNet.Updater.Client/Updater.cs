@@ -168,6 +168,13 @@ public sealed class Updater
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable, ex.Message, manifest.HttpVersion ?? string.Empty);
         }
 
+        // manifest 是**远端数据**：由它派生出的相对路径必须落在安装根内（§4.14）。
+        // 在动任何东西之前拒绝 —— 一条越界路径就说明这份清单要么坏了、要么是恶意的。
+        if (PathSafety.FirstUnsafe(remote.Manifest.Files.Select(f => (string?)f.RelativePath())) is { } unsafePath)
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.PathEscape,
+                $"清单里有逃出安装根的路径（例：{unsafePath}）：整个更新拒绝执行",
+                manifest.HttpVersion ?? string.Empty);
+
         ManifestModel? local = null;
         var localCorrupt = false;
         if (localHash is not null)

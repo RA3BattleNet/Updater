@@ -139,4 +139,7 @@ public static class UpdateReasons
 
     /// <summary>等到时限仍有进程在使用这棵树（§12.5 的静默判据）：本轮不落地，什么都不动。</summary>
     public const string TreeBusy = "tree_busy";
+
+    /// <summary>清单 / 计划里出现了逃出安装根的路径（绝对路径、盘符、`..`、UNC、`\\?\` 注入）：整个更新拒绝执行。</summary>
+    public const string PathEscape = "path_escape";
 }
