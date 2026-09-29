@@ -85,6 +85,14 @@ public sealed record UpdateConfig
     public IReadOnlyList<string> ExcludedDirs { get; init; } = [];
 
     /// <summary>备用资源根地址；主地址失败时按顺序回退（AGENT.md §4.6）。</summary>
+    /// <summary>
+    /// **内容**（`files/` 与 `patches/`）的基准地址。清单地址与内容地址**允许不同源**：
+    /// 例如清单放一台小主机、内容放 CDN。
+    /// 不填时退回"`ManifestUrl` 所在目录"（默认行为不变）；
+    /// 末尾斜杠可有可无（内部会补齐）。
+    /// </summary>
+    public string? BaseUrl { get; init; }
+
     public IReadOnlyList<string> FallbackBaseUrls { get; init; } = [];
 
     /// <summary>自适应并发的**起始值**（AGENT.md §4.6：2 起）。</summary>
@@ -196,9 +204,16 @@ public sealed record UpdateConfig
 
     public string ResolveToolsDir() => ToolsDir ?? Path.Combine(AppContext.BaseDirectory, "tools");
 
-    /// <summary>远端 manifest 所在目录，作为 files/ 与 patches/ 的基准地址。</summary>
+    /// <summary>
+    /// **内容**（files/ 与 patches/）的基准地址。
+    /// 显式给了 <see cref="BaseUrl"/> 就用它 —— 清单与内容允许不同源（§3.2）；
+    /// 没给才退回"manifest 所在目录"，与历史行为一致。
+    /// </summary>
     public string ResolveBaseUrl()
     {
+        if (!string.IsNullOrWhiteSpace(BaseUrl))
+            return BaseUrl!.EndsWith('/') ? BaseUrl : BaseUrl + "/";
+
         var uri = new Uri(ManifestUrl, UriKind.Absolute);
         return new Uri(uri, ".").ToString();
     }

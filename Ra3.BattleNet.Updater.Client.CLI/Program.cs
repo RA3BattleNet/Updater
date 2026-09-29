@@ -62,6 +62,7 @@ internal static class Program
         string? root = null, manifestUrl = null, localManifest = null, cacheDir = null, toolsDir = null, log = null;
         var exclude = new List<string>();
         var fallback = new List<string>();
+        string? baseUrl = null;
         var concurrency = 4;
         var verifyUnchanged = false;
         var applyMode = ApplyMode.InPlace;
@@ -90,6 +91,7 @@ internal static class Program
                 case "--tools-dir": toolsDir = Next(args, ref i); break;
                 case "--log": log = Next(args, ref i); break;
                 case "--exclude": exclude.AddRange(Split(Next(args, ref i))); break;
+                case "--base-url": baseUrl = Next(args, ref i); break;
                 case "--fallback": fallback.AddRange(Split(Next(args, ref i))); break;
                 case "--concurrency": concurrency = int.Parse(Next(args, ref i)); break;
                 case "--threshold-files": thresholdFiles = int.Parse(Next(args, ref i)); break;
@@ -124,6 +126,7 @@ internal static class Program
             ToolsDir = toolsDir is null ? null : Path.GetFullPath(toolsDir),
             LogPath = log is null ? null : Path.GetFullPath(log),
             ExcludedDirs = exclude,
+            BaseUrl = baseUrl,
             FallbackBaseUrls = fallback,
             MaxConcurrency = concurrency,
             FullPackageThresholdFiles = thresholdFiles,
@@ -169,7 +172,8 @@ internal static class Program
         Console.WriteLine("  --tools-dir <目录>        外部工具目录（默认程序目录）");
         Console.WriteLine("  --log <路径>              日志路径（默认 <cache-dir>/update.log；未指定 cache-dir 时用用户目录下的 updater-logs）");
         Console.WriteLine("  --exclude <列表>          不受管顶层目录，逗号分隔");
-        Console.WriteLine("  --fallback <列表>         备用基准地址，逗号分隔");
+        Console.WriteLine("  --base-url <地址>         内容（files/、patches/）的基准地址；不填则取 --manifest-url 所在目录");
+        Console.WriteLine("  --fallback <列表>         备用基准地址，逗号分隔（主地址失败时按顺序回退）");
         Console.WriteLine("  --concurrency <N>         并发上限（默认 4）");
         Console.WriteLine("  --threshold-files <N>     待下载文件数阈值（默认 0 = 关闭）");
         Console.WriteLine("  --threshold-ratio <R>     待下载文件数占比阈值（默认 0 = 关闭）");

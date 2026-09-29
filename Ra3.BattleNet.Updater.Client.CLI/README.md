@@ -13,6 +13,7 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
   --tools-dir <目录>        外部工具目录（默认程序目录）
   --log <路径>              日志路径（默认 <cache-dir>/update.log；未指定 cache-dir 时用用户目录下的 updater-logs）
   --exclude <列表>          不受管顶层目录，逗号分隔
+  --base-url <地址>         内容（files/、patches/）的基准地址；不填则取 --manifest-url 所在目录
   --fallback <列表>         备用基准地址，逗号分隔
   --concurrency <N>         并发上限（默认 4）
   --threshold-files <N>     待下载文件数阈值（默认 0 = 关闭）

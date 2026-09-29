@@ -138,6 +138,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `RootPath` | **必填** | 安装根目录 |
 | `ApplyMode` | `InPlace` | 落地模式：`InPlace` 就地替换（会话内生效）；`Staged` 只暂存到 `<root>/UpdaterStage/`，由独立 applier 在宿主退出后落地（自更新必须走这条）。 |
 | `ManifestUrl` | **必填** | 远端清单地址 |
+| `BaseUrl` | 空（= 清单所在目录） | **内容**（`files/`、`patches/`）的基准地址；清单与内容**允许不同源**（清单放小主机、内容放 CDN） |
 | `LocalManifestPath` | `{RootPath}/manifest.xml` | 本地清单：**它的字节就是版本身份** |
 | `CacheDir` | `<系统临时目录>/updater-cache/<安装根指纹>` | 下载产物：`.part`（续传）、内容 blob（文件名 = 目标 MD5，平铺在缓存根）、补丁缓存、`manifest.etag` / `manifest.remote.xml`；**可随时清空**（最坏重下） |
 | `ToolsDir` | 程序自身目录 | `hdiffpatch_bin` 所在目录 |
@@ -178,6 +179,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
   --local-manifest <路径>   --cache-dir <目录>   --tools-dir <目录>   --log <路径>
   --exclude <列表>          --fallback <列表>    --concurrency <N>
+  --base-url <地址>         内容基准地址（清单与内容可不同源；不填 = 清单所在目录）
   --threshold-files <N>     --threshold-ratio <R>  --verify-unchanged   --json
   --apply-mode <模式>       inplace（默认，就地替换）/ staged（只暂存，宿主退出后由 applier 落地）
 ```
