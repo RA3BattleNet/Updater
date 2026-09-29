@@ -21,6 +21,12 @@
 [`../Ra3.BattleNet.Updater.Server.PatchGenerator/README.md`](../Ra3.BattleNet.Updater.Server.PatchGenerator/README.md)。
 流水线的完整命令示例见 [`../USAGE.md`](../USAGE.md) §3。
 
+## 回滚与保留
+
+服务端要支持"把当前清单指回旧版本"，需要保留**窗口内**的清单、内容与补丁。
+一句话：**blob 是能力（删了就回不去）、patch 是优化（删了只损失带宽）**，
+且**永远先传新、再删旧、最后翻 `manifest.xml`**。
+
 ## 注意
 
 - **链式生成**：第 N 版清单要以第 N-1 版为基线（`--old-xmlpath/--old-root`），否则 UUID 链断裂 →
