@@ -34,7 +34,8 @@
       `ApplierPackagingTests.CheckedInApplier_MatchesCurrentSources` 会把"忘了刷新"变成红灯。
   -->
   <ItemGroup>
-    <Content Include="applier_bin\**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 只带 {RID}/ 子目录：那个目录里只该有 applier 的产物（构建期的记录放在 Share/applier_build.json，不随包） -->
+    <Content Include="applier_bin\*\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

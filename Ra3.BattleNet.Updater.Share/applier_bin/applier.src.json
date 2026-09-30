@@ -1,7 +1,0 @@
-{
-  "SourcesHash": "9e6606e71c4c8be7fc2aedfb59bf0bce",
-  "Rid": "win-x64",
-  "PublishCommand": "dotnet publish \"G:\\Project\\增量更新器\\Updater_repo\\Ra3.BattleNet.Updater.Client.Applier\\Ra3.BattleNet.Updater.Client.Applier.csproj\" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o <tmp>",
-  "Sources": 22,
-  "UtcTime": "2026-09-30T22:19:12.7989316Z"
-}

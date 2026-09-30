@@ -14,9 +14,17 @@
 
 - 宿主用 `StagedApplier.FindDefaultApplierExe()` 让库自己去找（别各自拼路径）；
 - 它是清单里的**受管文件**，会随更新一起被替换（**旧 applier 落新 applier**）；
+- 随包**覆盖 `HdiffTool.ShippedRids` 的每一个平台**（`win-x64` / `win-x86` / `linux-x64`，共约 0.8 MB）。
+  漏掉一个平台的后果是：那类宿主上 `FindDefaultApplierExe()` 只返回 `null`（**自更新直接不可用**），
+  而且只有运行时才发现 —— 所以有 `ApplierPackagingTests.ApplierCoversEveryShippedRid` 这条**策略测试**钉着；
+  若某平台确实决定暂不带，必须同时改那条测试并写明原因。
 - ⚠ 它是**签入仓库的构建产物**：改了 `Client.Applier` / `Client` / `Share` 的源码之后必须跑
   `refresh-applier.ps1`（仓库根）。忘了刷新由守卫测试 `ApplierPackagingTests.CheckedInApplier_MatchesCurrentSources`
   抓成红灯 —— 否则会出现"代码里有修复、随包发的是旧 exe"，测试还全绿。
+  - `pwsh -File refresh-applier.ps1` → 按 `HdiffTool.ShippedRids` 全刷；
+    `-Rids win-x64,win-x86` 只刷指定的那几个（会让上面的策略测试变红，属预期）。
+- **构建期的记录不随包**：源码指纹 + RID 列表在 `Ra3.BattleNet.Updater.Share/applier_build.json`。
+  `applier_bin/` 整目录随宿主产出走，所以那里**只放产物本身**（放了记录就等于把开发机路径带进用户安装树）。
 
 ## 宿主怎么接（三步）
 

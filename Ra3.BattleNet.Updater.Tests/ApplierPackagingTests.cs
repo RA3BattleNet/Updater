@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Ra3.BattleNet.Updater.Client;
+using Ra3.BattleNet.Updater.Share.Utilities;
 
 namespace Ra3.BattleNet.Updater.Tests;
 
@@ -12,7 +13,7 @@ namespace Ra3.BattleNet.Updater.Tests;
 /// </summary>
 public class ApplierPackagingTests
 {
-    private sealed record Package(string SourcesHash, string Rid, int Sources);
+    private sealed record Package(string SourcesHash, string[] Rids, int Sources);
 
     /// <summary>参与构建 applier 的三份源码（闭包：它引用 Client，Client 引用 Share）。</summary>
     private static readonly string[] FingerprintDirs =
@@ -32,8 +33,12 @@ public class ApplierPackagingTests
         return dir!.FullName;
     }
 
+    /// <summary>
+    /// 构建期记录。**它不放在 `applier_bin/` 里**：那个目录整目录随宿主产出走（`Content`），
+    /// 而记录运行时没人读 —— 放进去等于把一个带开发机路径的文件塞进用户的安装树。
+    /// </summary>
     private static string RecordPath(string repoRoot) =>
-        Path.Combine(repoRoot, "Ra3.BattleNet.Updater.Share", "applier_bin", "applier.src.json");
+        Path.Combine(repoRoot, "Ra3.BattleNet.Updater.Share", "applier_build.json");
 
     /// <summary>
     /// 与 `refresh-applier.ps1` **逐字一致**的算法：每个源文件一行 <c>相对路径:小写MD5</c>，
@@ -70,7 +75,7 @@ public class ApplierPackagingTests
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
         var root = doc.RootElement;
         return new Package(root.GetProperty("SourcesHash").GetString()!,
-            root.GetProperty("Rid").GetString()!,
+            root.GetProperty("Rids").EnumerateArray().Select(x => x.GetString()!).ToArray(),
             root.GetProperty("Sources").GetInt32());
     }
 
@@ -89,13 +94,39 @@ public class ApplierPackagingTests
 
         Assert.Equal(pkg.SourcesHash, SourcesFingerprint(repoRoot));   // 不一致 → 跑 refresh-applier.ps1
         Assert.True(pkg.Sources > 0, "指纹里一个源文件都没有？");
-        Assert.True(File.Exists(ApplierPath(repoRoot, pkg.Rid)),
-            $"承载目录里没有 applier 产物：{ApplierPath(repoRoot, pkg.Rid)}");
+        Assert.NotEmpty(pkg.Rids);
+        foreach (var rid in pkg.Rids)
+            Assert.True(File.Exists(ApplierPath(repoRoot, rid)),
+                $"承载目录里没有 applier 产物：{ApplierPath(repoRoot, rid)}");
     }
 
+    /// <summary>
+    /// **策略测试**：随包 applier 必须覆盖 `HdiffTool.ShippedRids` 里的每一个平台。
+    ///
+    /// 理由：仓库已经用测试钉住了"32 位 Windows 宿主是受支持场景"（`PatchToolTests.ShippedRids_CoverThe32BitWindowsHost`）。
+    /// applier 若漏掉某个平台，那个平台的宿主上 `FindDefaultApplierExe()` 只会返回 `null` ——
+    /// **自更新直接不可用，而且只有运行时才发现**。
+    /// 若某平台确实决定暂时不带，必须**同时改这条测试并写明原因** —— 让决定是显式的，不是漏掉的。
+    /// </summary>
+    [Fact]
+    public void ApplierCoversEveryShippedRid()
+    {
+        var repoRoot = RepoRoot();
+        foreach (var rid in HdiffTool.ShippedRids)
+        {
+            var path = ApplierPath(repoRoot, rid);
+            Assert.True(File.Exists(path),
+                $"随包 RID {rid} 没有 applier 产物（跑 refresh-applier.ps1，或显式改这条策略测试并说明原因）：{path}");
+        }
+    }
+
+    /// <summary>
+    /// 承载目录里的产物路径。**文件名按 RID 判**（不是按当前 OS 判）：这里可能是在核对**别的平台**的产物
+    /// （例如在 Windows 上核对 `linux-x64/Client.Applier`），照当前 OS 拼名字会找错文件。
+    /// </summary>
     private static string ApplierPath(string repoRoot, string rid) =>
         Path.Combine(repoRoot, "Ra3.BattleNet.Updater.Share", "applier_bin", rid,
-            OperatingSystem.IsWindows() ? "Client.Applier.exe" : "Client.Applier");
+            rid.StartsWith("win-", StringComparison.OrdinalIgnoreCase) ? "Client.Applier.exe" : "Client.Applier");
 
     /// <summary>它必须随库的输出进到引用方的目录里 —— 宿主"只引用 client 库"就够，不需要自己做任何部署。</summary>
     [Fact]

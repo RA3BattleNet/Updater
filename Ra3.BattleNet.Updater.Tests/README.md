@@ -45,7 +45,7 @@ dotnet run -c Release StagedApplierTests.Apply_LandsTheStaged # 精确到方法
 | `StagedApplyTests` / `StagedUpdateTests` / `StagedApplierTests` | 暂存模式：状态判定纯函数、阶段一、落地（含"中断后收敛""备份回滚""等宿主退出"**"零网络""不写 ETag"**） |
 | `BaselineAdoptionTests` | 没有可信基线时按磁盘哈希核对（含"保险丝看到的是真实工作量"的正反两条） |
 | `ApplierConfigTests` | applier 的参数契约：往返解析、宽松（吃下未来参数）、严格（白名单）、必需参数 |
-| `ApplierPackagingTests` | applier 产物随库分发 + **源码指纹守卫**（改了源码没跑 `refresh-applier.ps1` 就红） |
+| `ApplierPackagingTests` | applier 产物随库分发 + **源码指纹守卫**（改了源码没跑 `refresh-applier.ps1` 就红）+ **覆盖 `ShippedRids` 的策略测试** |
 | `ApplierProcessTests` | **真启动**签入的那个 applier exe：零网络落地 + **自更新（改名自己正在运行的映像）** |
 | `ManifestFreshnessTests` | 缓存比树新 / 命中 304 也要自愈；`--verify-unchanged` 真的会逐文件核对 |
 | `PathSafetyTests` | 路径信任边界（逃逸向量表） |
