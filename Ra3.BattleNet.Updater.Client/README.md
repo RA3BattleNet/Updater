@@ -43,7 +43,7 @@ switch (r.Outcome)
 | `HttpFetcher.cs` | 并发与滑动窗口、Range 续传（`.part`）、`If-None-Match`/304、多源回落、停滞超时 |
 | `UpdateConfig.cs` | 全部公共配置（`init` 属性）；缓存/日志默认路径的推导也在这 |
 | `UpdateResult.cs` | 结果类型 + `UpdateReasons` 原因码 + **`ToJson()`（一行 JSON 契约）** |
-| `UpdateLog.cs` / `UpdateProgress.cs` | 日志（TAB 分行，**格式是契约**）与进度回调 |
+| `UpdateLog.cs` / `UpdateProgress.cs` | 日志（TAB 分行，**格式是契约**；`S`/`F`/`R` 三种行 + applier 写的 `C` 上下文行）与进度回调 |
 | `Fs.cs` | 长路径安全的文件操作（自动加 `\\?\`） |
 | `StageLayout.cs` | 暂存区布局：`UpdaterStage/{new,old}/`、`plan.json` 的读写与清理 |
 | `StagedApplier.cs` | **阶段二 + 三**：宿主退出后把暂存内容落地（只做改名、先修后验、落地才推进清单）。**零网络**：配置是 `ApplierConfig`，它没有清单地址 —— 输入只有阶段一留在缓存里的那份清单原文 |
@@ -81,7 +81,7 @@ switch (r.Outcome)
 
 ## 改这里的注意事项
 
-- 动 `UpdateLog` 的列名/顺序 → 那是契约，**只允许往行尾追加**。
+- 动 `UpdateLog` 的列名/顺序 → 那是契约，**只允许往行尾追加列或新增行型**（`C` 行就是这么加的）。
 - 动 `UpdateResult.ToJson()` → 字段**只增不改**；`Applied` / `PendingRestart` 是独立进程壳判断
   "要不要重启"的唯一信号。
 - 动落地语义 → 先读 `StageRecovery` 的判定表，别绕开"**永远改名不覆盖**"和"**每步幂等**"。

@@ -101,7 +101,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 
 | `UpdateOutcome` | 含义 | 宿主该做什么 |
 |---|---|---|
-| `UpToDate` | 已是最新（1 次清单请求，命中 304 时 **0 字节**） | 直接启动 |
+| `UpToDate` | 已是最新（1 次清单请求，命中 304 时 **0 字节**）。**没有本地清单、但磁盘逐文件核对下来已经是远端那一版**时也走这里（此时会顺手把本地清单与 ETag 落盘） | 直接启动 |
 | `Updated` | 更新成功，本地清单已更新 | 直接启动 |
 | `Staged` | 暂存模式阶段一成功：内容已就绪，**但还没落地**（宿主退出后由 applier 生效） | 提示用户退出/重启；**不要**回退到你自己的整包流程 |
 | `NeedsHostFallback` | **正常分支**：本地状态不可信 / 达到保护阈值（原因见 `Reason`+`Detail`） | 走你自己的整包逻辑（BT / 直链）；**这不是错误** |
@@ -123,8 +123,12 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 > 三个字节口径别混用：`BytesDownloaded` 是内容、`PayloadBytes` 是解压后正文、`WireBytes` 才是网线。
 > 实测同一次真实更新（v4→v5，35 请求）：内容 1.85 MiB、payload 1.86 MiB、**wire 1.89 MiB**。
 
-`Reason` 里几个值得宿主单独认的：`pending_staged_apply`（有已暂存未落地的更新，却走了就地模式）、
-`staged_plan_stale`（暂存内容对应的远端清单已经变了，本轮不落地）、
+`Reason` 里几个值得宿主单独认的：`already_running`（同一安装根已有一个会话/落地在跑）、
+`pending_staged_apply`（有已暂存未落地的更新，却走了就地模式）、
+`staged_plan_stale`（**落地阶段**的一致性自检没过：缓存里的远端清单与计划对不上，说明缓存被替换或损坏了 ——
+不是"远端发了新版本"，那一种不改动任何东西、留到下一次更新）、
+`manifest_unavailable`（取不到清单：阶段一是网络/服务端问题；**落地阶段**是阶段一留在缓存里的清单不在 ——
+此时暂存内容与计划原样保留，下一次更新会话会把清单补齐、届时 applier 可以继续落地）、
 `tree_busy`（等不到树静默：宿主 PID 未退出，或**清单里列出的 `.exe`** 仍在树内运行；**一个文件都没动**）、
 `path_escape`（**远端清单、本地清单、或落地计划里出现了逃出安装根的路径 → 整个更新被拒，一个文件都不动**；
 本地清单也算 —— 它同样可能被篡改或从旧备份还原，而它的路径会被当成改名的来源）。
@@ -145,7 +149,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `ManifestUrl` | **必填** | 远端清单地址 |
 | `BaseUrl` | 空（= 清单所在目录） | **内容**（`files/`、`patches/`）的基准地址；清单与内容**允许不同源**（清单放小主机、内容放 CDN） |
 | `LocalManifestPath` | `{RootPath}/manifest.xml` | 本地清单：**它的字节就是版本身份** |
-| `CacheDir` | `<系统临时目录>/updater-cache/<安装根指纹>` | 下载产物：`.part`（续传）、内容 blob（文件名 = 目标 MD5，平铺在缓存根）、补丁缓存、`manifest.etag` / `manifest.remote.xml`；**可随时清空**（最坏重下） |
+| `CacheDir` | `<系统临时目录>/updater-cache/<安装根指纹>` | 下载产物：`.part`（续传）、内容 blob（文件名 = 目标 MD5，平铺在缓存根）、补丁缓存、`manifest.etag` / `manifest.remote.xml`；**可随时清空**（最坏重下）。唯一例外：**在阶段一与 applier 之间**清掉它，落地会以 `manifest_unavailable` 拒绝（暂存内容与计划保留，下一次更新补齐后照常落地） |
 | `ToolsDir` | 程序自身目录 | `hdiffpatch_bin` 所在目录 |
 | `ExcludedDirs` | 空 | 不受管顶层目录名（大小写不敏感），其下文件永不参与更新 |
 | `FallbackBaseUrls` | 空 | 备用资源根地址；主地址失败时按顺序回退（404 也会继续试下一个源） |
@@ -172,12 +176,14 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | 行 | 列 |
 |---|---|
 | `S` 每轮开始 | `run_id`, `utc_iso` |
+| `C` 每轮上下文 | `run_id`, `name`, `value` —— 目前只有 applier 写，共 3 行：`root` / `cacheDir` / `manifestFile`（它实际用的那三个路径，用来核对"阶段一与落地指向同一处"）。**排列在该轮 `S` 行之前** |
 | `F` 每文件 | `run_id`,`uuid`,`old_md5`,`old_path`,`new_md5`,`new_path`,`action`,`status`,`reason`,`bytes`,`ms`,`payload` |
 | `R` 每轮收尾 | `run_id`,`remote_manifest_hash`,`total`,`skip`,`move`,`patch`,`full`,`fail`,`bytes`,`ms`,`result`,`requests`,`payload`,`wire` |
 
+- `run_id` = `yyyyMMddTHHmmss-<PID>-<本轮序号>`；applier 那一轮的结尾是 `-apply`（同一个日志里两种轮次都有，按 `run_id` 分组即可）。
 - `action` = `skip` / `move` / `patch` / `full`；`status` = `0` 成功、`1` 未找到、`2` 重试超限、`3` 校验失败、`4` IO/权限/磁盘、`5` 判定需完整包、`9` 其他。
 - `reason`（`action=full` 时最关键、**不允许为空**）= `no_local` / `no_patch` / `patch_failed` / `policy` / `local_corrupt` 等。
-- **只允许往行尾追加列，不要改既有列**；分析脚本按 `run_id` 分组（一次进程可能跑多轮）。
+- **只允许往行尾追加列、或新增行型；不要改既有列**；分析脚本按 `run_id` 分组（一次进程可能跑多轮）。
 
 ### 2.7 独立进程壳（宿主不是 C# 时）
 
@@ -202,9 +208,10 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
 ```
 Client.CLI --apply --root <安装目录> [--manifest-file <路径>] [--wait-for-pid <宿主PID>] [--quiescence-timeout 600] [--poll-seconds 2] [--json]
 ```
-`--apply` 是**零网络**的：它不认 `--manifest-url`（给了会直接报错，退出码 2），只读阶段一留在
-缓存里的那份清单原文（`--manifest-file`，默认 `<cache-dir>/manifest.remote.xml`）。那份文件不在
-⇒ **拒绝落地**（`reason=manifest_unavailable`，本地清单不被改写、暂存内容原样保留），**不联网重取** ——
+`--apply` 是**零网络**的：它不认 `--manifest-url`（给了会直接报错，退出码 2；`--tools-dir` / `--concurrency` /
+`--base-url` / `--fallback` / `--threshold-*` / `--verify-unchanged` 等同理 —— 那些只属于阶段一），
+只读阶段一留在缓存里的那份清单原文（`--manifest-file`，默认 `<cache-dir>/manifest.remote.xml`）。那份文件不在
+⇒ **拒绝落地**（`reason=manifest_unavailable`，本地清单不被改写、暂存内容与计划原样保留），**不联网重取** ——
 落地的是"已经规划并暂存好的那一版"，不是"线上最新版"。
 `--wait-for-pid` 认宿主时连**进程名与启动时刻**一起比（`--wait-for-name` / `--wait-for-start`）——
 PID 会被系统复用，只认 PID 可能把"抢到同一个 PID 的无关进程"当成宿主还在，白等到超时。
@@ -241,7 +248,7 @@ switch (r.Outcome)
 ```
 ① 库把内容暂存好（宿主还在跑）   → 结果 Staged、PendingRestart == true、退出码 3
 ② 宿主先挂起 applier，再正常退出 → applier 等宿主 PID + 等树静默
-③ applier 落地 → 写本地清单/ETag → 清理 new/（old/ 留到下一轮启动时清）
+③ applier 落地 → 写本地清单（**不写 ETag**）→ 清理 new/（old/ 留到下一轮启动时清）
 ```
 
 ```csharp
@@ -282,7 +289,10 @@ if (r.PendingRestart)
 2. **不要在更新线程里直接退出进程**：更新很可能不在主线程。库不碰进程生命周期，「退出」是宿主的事 —— 请把 `PendingRestart` 变成信号交给主循环，由主线程按自己的顺序保存状态、关窗、退出。
 3. **不要重定向 applier 的 stdio**（`BuildApplyCommand` 已不带重定向）：管道会随宿主退出而失效，applier 写日志就会出错。
 4. **别把 applier 放进带 `KILL_ON_JOB_CLOSE` 的 Job Object**，否则宿主一退它被一起杀（**子进程默认继承作业成员身份**）。先确认宿主到底有没有这种作业 —— 自写启动器通常没有（代码里不出现 `CreateJobObject` 就没有）。真有的话，可靠解是**换掉"创建者"**：计划任务、WMI `Win32_Process.Create`（由服务创建，天然在作业外）、或 `explorer.exe <路径>`。
-   **别指望 `UseShellExecute = true`**：它**不保证**脱离作业，代价却是失去 .NET 的正确参数转义（`UseShellExecute=true` 时 `ArgumentList` 不能用，得自己拼命令行 —— 我们的路径又长、又带空格和中文），还可能出现控制台窗口。不值当。
+   **别指望 `UseShellExecute = true`**：它**不保证**脱离作业（那才是它被寄予的唯一理由），
+   所以不作为解决手段。顺带更正一个流传过的说法：`UseShellExecute = true` 与 `ArgumentList`
+   在 .NET 10 上**可以共存**（本项目实测过：不抛异常、参数生效、退出码 0），
+   "不能用 ArgumentList、得自己拼命令行"是错的；真正的代价是它**解决不了**这个问题。
 5. **落地要树静默**：宿主必须**真的退出**（applier 等的是宿主 PID），并且**清单里列出的 `.exe`** 不能在树内还在跑。扫描范围就是这两条 —— 树内**不被 manifest 管理**的 exe（自备工具、临时进程、WebView2 子进程等）**不会**被判为繁忙，它们的影响是"占着文件导致改名失败"，那时返回 `io_error` 而非 `tree_busy`。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。（判据原文见 `AGENT.md` §12.5）
 6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行会自动续做；最坏是「这次没生效」，不会「半个版本」。
 7. **离线也能落地，而且落地阶段根本没有网络这条路**：阶段一把远端清单原文留在缓存里，applier 只读它
@@ -303,7 +313,7 @@ if (r.PendingRestart)
 
 | 场景 | 为什么 / 宿主该怎么做 |
 |---|---|
-| 宿主在带 `KILL_ON_JOB_CLOSE` 的 **Job Object** 里 | applier 会被宿主退出**连带杀掉**，本库不处理。自写启动器通常没有这种作业（代码里不出现 `CreateJobObject` 就没有）。真有的话，换掉"创建者"：计划任务 / WMI `Win32_Process.Create` / `explorer.exe <路径>`。**别指望 `UseShellExecute = true`**（不保证脱离，还会丢掉参数转义） |
+| 宿主在带 `KILL_ON_JOB_CLOSE` 的 **Job Object** 里 | applier 会被宿主退出**连带杀掉**，本库不处理。自写启动器通常没有这种作业（代码里不出现 `CreateJobObject` 就没有）。真有的话，换掉"创建者"：计划任务 / WMI `Win32_Process.Create` / `explorer.exe <路径>`。**别指望 `UseShellExecute = true`**（它不保证脱离作业；它和 `ArgumentList` 能共存这一点已实测，见要点 4） |
 | 宿主**托盘常驻**、"关窗口不退出进程" | applier 等不到树静默 → `tree_busy`。宿主必须保证"用户点了关闭，进程真的退" |
 | 安装根对当前用户**不可写** | **阶段一就会失败**（`UpdaterStage/` 写在安装根下）。要么宿主提权运行，要么安装期放宽 ACL / 装到可写位置 |
 | ~~想让 applier 代替宿主重启~~ | **现在有了**（可选，默认关）—— 见下面的「落地后自动拉起宿主」 |
