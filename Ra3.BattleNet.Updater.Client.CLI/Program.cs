@@ -161,82 +161,19 @@ internal static class Program
     // ================================================================ 阶段二/三：落地
 
     /// <summary>
-    /// 落地阶段的参数。只认 applier 真正用得上的那些；阶段一专用的参数在这里是**错误**。
+    /// 落地阶段的参数：**摘掉本壳自己的开关，其余交给库里那一份解析实现**（<c>ApplierConfig.FromArgs</c>）。
     ///
-    /// 为什么不当成"忽略"：`ApplierConfig` 里根本没有清单地址 —— 落地阶段不联网、也不下内容，
-    /// 它唯一的输入是阶段一留在缓存里的那份清单原文。如果有人还按老命令行传 `--manifest-url`，
-    /// 说明他心里"落地还要去取远端"这个模型还在；静默吞掉它会让这个误解一直活下去。
-    /// 当场报错，改起来只是一行。
+    /// 为什么是"严格"：`Client.CLI` 有两个模式，参数混着递是常见的误用（比如还按老命令行传
+    /// `--manifest-url`）。applier 只认落地阶段那几个参数 —— **白名单之外一律拒**（含所有更新会话的参数），
+    /// 而不是静默忽略：静默吞掉会让"落地还要去取远端"这个误解一直活下去。
+    /// 白名单就是解析器认识的那些，所以以后新增阶段一参数**不需要再来改任何名单**。
     /// </summary>
     private static ApplierConfig ParseApplier(string[] args)
     {
-        string? root = null, manifestFile = null, localManifest = null, cacheDir = null, log = null;
-        int? waitForPid = null;
-        string? waitForName = null;
-        long? waitForStart = null;
-        string? restartExe = null;
-        string? restartArgs = null;
-        string? restartCwd = null;
-        var restartDelaySeconds = 1;
-        var quiescenceSeconds = 600;
-        var pollSeconds = 2;
-
-        for (var i = 0; i < args.Length; i++)
-        {
-            switch (args[i])
-            {
-                case "--root": root = Next(args, ref i); break;
-                case "--manifest-file": manifestFile = Next(args, ref i); break;
-                case "--local-manifest": localManifest = Next(args, ref i); break;
-                case "--cache-dir": cacheDir = Next(args, ref i); break;
-                case "--log": log = Next(args, ref i); break;
-                case "--wait-for-pid": waitForPid = int.Parse(Next(args, ref i)); break;
-                case "--wait-for-name": waitForName = Next(args, ref i); break;
-                case "--wait-for-start": waitForStart = long.Parse(Next(args, ref i)); break;
-                case "--restart": restartExe = Next(args, ref i); break;
-                case "--restart-args": restartArgs = Next(args, ref i); break;
-                case "--restart-cwd": restartCwd = Next(args, ref i); break;
-                case "--restart-delay": restartDelaySeconds = int.Parse(Next(args, ref i)); break;
-                case "--quiescence-timeout": quiescenceSeconds = int.Parse(Next(args, ref i)); break;
-                case "--poll-seconds": pollSeconds = int.Parse(Next(args, ref i)); break;
-                case "--apply": break;
-                case "--json": break;
-                default: throw new ArgumentException(StageOneOnly(args[i]) ?? $"未知参数：{args[i]}");
-            }
-        }
-
-        if (string.IsNullOrEmpty(root)) throw new ArgumentException("缺少 --root");
-
-        return new ApplierConfig
-        {
-            RootPath = Path.GetFullPath(root),
-            ManifestFile = manifestFile is null ? null : Path.GetFullPath(manifestFile),
-            LocalManifestPath = localManifest is null ? null : Path.GetFullPath(localManifest),
-            CacheDir = cacheDir is null ? null : Path.GetFullPath(cacheDir),
-            LogPath = log is null ? null : Path.GetFullPath(log),
-            WaitForProcessId = waitForPid,
-            WaitForProcessName = waitForName,
-            WaitForProcessStartTicks = waitForStart,
-            // CLI 里出现 --restart 就是"要重启"，不必再要一个开关
-            RestartAfterApply = restartExe is not null,
-            RestartExecutable = restartExe,
-            RestartArguments = restartArgs,
-            RestartWorkingDirectory = restartCwd,
-            RestartDelay = TimeSpan.FromSeconds(Math.Max(0, restartDelaySeconds)),
-            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(Math.Max(1, quiescenceSeconds)),
-            ApplierPollInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds)),
-        };
+        // --json 是"本壳怎么输出"的开关，不属于 applier 的参数集（--apply 属于，库里认它）
+        var applierArgs = args.Where(a => a is not "--json").ToArray();
+        return ApplierConfig.FromArgs(applierArgs, UnknownArgPolicy.Strict);
     }
-
-    /// <summary>这些参数只属于阶段一；在 <c>--apply</c> 下给它们会得到一句明确的报错而不是静默忽略。</summary>
-    private static string? StageOneOnly(string arg) => arg switch
-    {
-        "--manifest-url" or "--tools-dir" or "--base-url" or "--fallback" or "--concurrency"
-            or "--threshold-files" or "--threshold-ratio" or "--verify-unchanged"
-            or "--no-adopt-local-tree" or "--exclude" or "--apply-mode"
-            => $"{arg} 是更新会话（阶段一）的参数：落地阶段不联网、也不下载内容，只把已经暂存好的那一版换上去",
-        _ => null,
-    };
 
     // ================================================================ 工具
 

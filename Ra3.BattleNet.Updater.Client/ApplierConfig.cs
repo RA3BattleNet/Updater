@@ -102,4 +102,108 @@ public sealed record ApplierConfig
 
     /// <summary>阶段一留在缓存里的远端清单原文（默认路径与阶段一那个文件名**必须一致**）。</summary>
     public string ResolveManifestFile() => ManifestFile ?? Path.Combine(ResolveCacheDir(), "manifest.remote.xml");
+
+    /// <summary>
+    /// 从命令行参数构造配置 —— **库内唯一一份实现**。
+    ///
+    /// 为什么要放在库里：参数是库里**生成**的（<see cref="StagedApplier.BuildApplyCommand"/>），
+    /// 而解析它的一直是各处**手写**的另一半（CLI 里一份、宿主自己 exe 里可能还有一份）。
+    /// 只要有人给 applier 加一个参数、改了生成端忘了改解析端，落地就会在**宿主已经退出之后**
+    /// 报一个"未知参数"而无人知晓。生成与解析同源就没有这类漂移。
+    ///
+    /// 【必须】两种策略（<see cref="UnknownArgPolicy"/>）：
+    ///   - <see cref="UnknownArgPolicy.Ignore"/>：**给机器用的 applier** —— 现场那个 exe 可能还是旧的
+    ///     （它很少更新、又必须能被更新），它必须能吃下**新生成器**加的参数；
+    ///   - <see cref="UnknownArgPolicy.Strict"/>：**给人用的 CLI** —— 白名单之外一律拒，
+    ///     防止"把更新会话的参数递给落地阶段"这种误用被静默吞掉。
+    ///
+    /// 【必须】必需参数（<c>--root</c>）在两种策略下都要报错 —— 宽松只管"多出来的参数"。
+    /// </summary>
+    public static ApplierConfig FromArgs(IEnumerable<string> args, UnknownArgPolicy policy)
+    {
+        var argv = args as string[] ?? args.ToArray();
+
+        string? root = null, manifestFile = null, localManifest = null, cacheDir = null, log = null;
+        int? waitForPid = null;
+        string? waitForName = null;
+        long? waitForStart = null;
+        string? restartExe = null, restartArgs = null, restartCwd = null;
+        var restartDelaySeconds = 1;
+        var quiescenceSeconds = 600;
+        var pollSeconds = 2;
+
+        for (var i = 0; i < argv.Length; i++)
+        {
+            switch (argv[i])
+            {
+                case "--root": root = Next(argv, ref i); break;
+                case "--manifest-file": manifestFile = Next(argv, ref i); break;
+                case "--local-manifest": localManifest = Next(argv, ref i); break;
+                case "--cache-dir": cacheDir = Next(argv, ref i); break;
+                case "--log": log = Next(argv, ref i); break;
+                case "--wait-for-pid": waitForPid = int.Parse(Next(argv, ref i)); break;
+                case "--wait-for-name": waitForName = Next(argv, ref i); break;
+                case "--wait-for-start": waitForStart = long.Parse(Next(argv, ref i)); break;
+                case "--restart": restartExe = Next(argv, ref i); break;
+                case "--restart-args": restartArgs = Next(argv, ref i); break;
+                case "--restart-cwd": restartCwd = Next(argv, ref i); break;
+                case "--restart-delay": restartDelaySeconds = int.Parse(Next(argv, ref i)); break;
+                case "--quiescence-timeout": quiescenceSeconds = int.Parse(Next(argv, ref i)); break;
+                case "--poll-seconds": pollSeconds = int.Parse(Next(argv, ref i)); break;
+                // 生成器（BuildApplyCommand）会带上它：它是"这次是落地调用"的标记。
+                // 对专用 applier exe 来说冗余（它本来就只干这个），但它属于这条命令的契约，必须认。
+                case "--apply": break;
+                default:
+                    if (policy == UnknownArgPolicy.Strict)
+                        throw new ArgumentException(
+                            $"未知参数：{argv[i]}（落地阶段不认它；更新会话（阶段一）的参数请用 Client.CLI 的非 --apply 模式）");
+                    break;   // Ignore：向前兼容 —— 旧 applier 必须能忽略新生成器加的参数
+            }
+        }
+
+        if (string.IsNullOrEmpty(root)) throw new ArgumentException("缺少 --root");
+
+        return new ApplierConfig
+        {
+            RootPath = Path.GetFullPath(root),
+            ManifestFile = manifestFile is null ? null : Path.GetFullPath(manifestFile),
+            LocalManifestPath = localManifest is null ? null : Path.GetFullPath(localManifest),
+            CacheDir = cacheDir is null ? null : Path.GetFullPath(cacheDir),
+            LogPath = log is null ? null : Path.GetFullPath(log),
+            WaitForProcessId = waitForPid,
+            WaitForProcessName = waitForName,
+            WaitForProcessStartTicks = waitForStart,
+            // 命令行里出现 --restart 就是"要重启"，不必再要一个开关
+            RestartAfterApply = restartExe is not null,
+            RestartExecutable = restartExe,
+            RestartArguments = restartArgs,
+            RestartWorkingDirectory = restartCwd,
+            RestartDelay = TimeSpan.FromSeconds(Math.Max(0, restartDelaySeconds)),
+            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(Math.Max(1, quiescenceSeconds)),
+            ApplierPollInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds)),
+        };
+    }
+
+    private static string Next(string[] args, ref int i)
+    {
+        if (i + 1 >= args.Length) throw new ArgumentException($"{args[i]} 缺少取值");
+        return args[++i];
+    }
+}
+
+/// <summary>
+/// 解析 applier 参数时遇到"不认识的参数"怎么办（AGENT.md §12.5）。
+/// 两个入口两种策略，但**只有一份解析实现**（<see cref="ApplierConfig.FromArgs"/>）。
+/// </summary>
+public enum UnknownArgPolicy
+{
+    /// <summary>报错（**给人用的 CLI**）：白名单之外一律拒，防误用、防把两个模式的参数混着递。</summary>
+    Strict,
+
+    /// <summary>
+    /// 忽略（**给机器用的 applier**）：不认识就不处理、不报错。
+    /// 这不是偷懒：现场那个 applier exe 可能是旧的（它很少被更新），而参数是**新版库**生成的，
+    /// 它必须能吃下自己不认识的新参数 —— 否则旧 applier 会让"更新"在无人值守时静默失败。
+    /// </summary>
+    Ignore,
 }
