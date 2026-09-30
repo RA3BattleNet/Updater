@@ -36,7 +36,8 @@
 | `Ra3.BattleNet.Updater.Server` | **服务端发布逻辑**：清单生成 + 生成期自检 + 补丁生成 |
 | `Ra3.BattleNet.Updater.XmlGenerator` | 壳：生成 `manifest.xml`（含自检报告） |
 | `Ra3.BattleNet.Updater.Server.PatchGenerator` | 壳：生成 `patches/` 与 `files/` |
-| `Ra3.BattleNet.Updater.Client.CLI` | 壳：独立进程跑一次更新 / 落地（`--apply`），宿主不是 C# 时用 |
+| `Ra3.BattleNet.Updater.Client.CLI` | 壳：独立进程跑一次更新 / 落地（`--apply`）——给人、脚本与测试用 |
+| `Ra3.BattleNet.Updater.Client.Applier` | 壳：**只做落地**的入口；随客户端库分发（引用库的宿主自动带上），是清单里的受管文件所以能被更新 |
 | `Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试（自带反射跑器，原因见它的 README） |
 
 约定：**核心逻辑 = 无后缀的库项目**（`Share` / `Client` / `Server`），**可执行壳 = 按角色命名**。

@@ -75,6 +75,6 @@ $rec = [PSCustomObject]@{
 }
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 $json = $rec | ConvertTo-Json -Depth 4
-[IO.File]::WriteAllText($recPath, $json, [System.Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($recPath, $json.Replace("`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))
 Write-Host ("[refresh-applier] SourcesHash = $sourcesHash  （$($keys.Count) 个源文件）")
 Write-Host ("[refresh-applier] 指纹写入 " + $recPath)

@@ -62,6 +62,7 @@
 | `Ra3.BattleNet.Updater.XmlGenerator` | 壳：生成 `manifest.xml`（含自检报告） |
 | `Ra3.BattleNet.Updater.Server.PatchGenerator` | 壳：生成 `patches/` 与 `files/` |
 | `Ra3.BattleNet.Updater.Client.CLI` | 壳：独立进程跑一次更新（宿主不是 C# 时用） |
+| `Ra3.BattleNet.Updater.Client.Applier` | 壳：**只做落地**的可执行入口（宿主退出后把暂存好的那一版换上去）；随客户端库分发、是清单里的受管文件，所以**能被更新** |
 | `Ra3.BattleNet.Updater.Tests` | 单元 + 端到端测试 |
 
 约定：**核心逻辑 = 无后缀的库项目**（`Share` / `Client` / `Server`），**可执行壳 = 按角色命名**。
@@ -176,7 +177,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | 行 | 列 |
 |---|---|
 | `S` 每轮开始 | `run_id`, `utc_iso` |
-| `C` 每轮上下文 | `run_id`, `name`, `value` —— 目前只有 applier 写，共 3 行：`root` / `cacheDir` / `manifestFile`（它实际用的那三个路径，用来核对"阶段一与落地指向同一处"）。**排列在该轮 `S` 行之前** |
+| `C` 每轮上下文 | `run_id`, `name`, `value` —— 只有 applier 写。先是 `root` / `cacheDir` / `manifestFile` 三行（**在该轮 `S` 行之前**：核对"阶段一与落地指向同一处"）；收尾再写 `result` / `reason` / `detail`（**在 `R` 行之后**：会话级失败的原因在这里，是"用户把日志发过来"的入口） |
 | `F` 每文件 | `run_id`,`uuid`,`old_md5`,`old_path`,`new_md5`,`new_path`,`action`,`status`,`reason`,`bytes`,`ms`,`payload` |
 | `R` 每轮收尾 | `run_id`,`remote_manifest_hash`,`total`,`skip`,`move`,`patch`,`full`,`fail`,`bytes`,`ms`,`result`,`requests`,`payload`,`wire` |
 
@@ -227,7 +228,7 @@ PID 会被系统复用，只认 PID 可能把"抢到同一个 PID 的无关进�
 | 模式 | 谁把文件换上去 | 何时生效 | 适合 |
 |---|---|---|---|
 | `InPlace`（默认） | 库自己，会话内同步完成 | 立即 | 不需要替换宿主自身的文件 |
-| `Staged` | 独立 applier（`Client.CLI --apply`） | **宿主退出之后** | 自更新；要求「要么整版落地、要么不动」 |
+| `Staged` | 独立 applier（`Client.Applier.exe`；`Client.CLI --apply` 是同一能力的 CLI 形态） | **宿主退出之后** | 自更新；要求「要么整版落地、要么不动」 |
 
 **直接用（`InPlace`）**
 
