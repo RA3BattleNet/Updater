@@ -311,15 +311,18 @@ public class StagedApplierTests
         Assert.False(File.Exists(marker), "没落地成功就不该拉起宿主");
     }
 
-    /// <summary>把服务端清单里的 <Path> 全换成逃逸值（模拟被篡改 / 损坏的远端清单）。</summary>
-    private static void TamperPath(Env e, string value)
+    /// <summary>把某个清单文件里的 <Path> 全换成逃逸值（模拟被篡改 / 位翻转 / 从旧备份还原）。</summary>
+    private static void TamperManifestPath(string manifestPath, string value)
     {
-        var p = Path.Combine(e.Server, "manifest.xml");
-        var xml = File.ReadAllText(p);
-        File.WriteAllText(p, System.Text.RegularExpressions.Regex.Replace(
+        var xml = File.ReadAllText(manifestPath);
+        File.WriteAllText(manifestPath, System.Text.RegularExpressions.Regex.Replace(
             xml, "<Path>[^<]*</Path>", "<Path>" + value + "</Path>",
             System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(5)));
     }
+
+    /// <summary>把**服务端**清单里的 <Path> 全换成逃逸值。</summary>
+    private static void TamperPath(Env e, string value) =>
+        TamperManifestPath(Path.Combine(e.Server, "manifest.xml"), value);
 
     [Fact]
     public void Update_WhenTheRemoteManifestHasAnEscapingPath_RefusesBeforeTouchingAnything()
@@ -336,6 +339,42 @@ public class StagedApplierTests
         Assert.Equal(UpdateReasons.PathEscape, result.Reason);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);            // 一个字节都没动
         Assert.False(StageLayout.HasPendingPlan(e.Client));
+    }
+
+    /// <summary>
+    /// **本地**清单的路径也要过信任边界（§4.14）。它不只是"防篡改"，也防**位翻转**与**从旧备份还原**：
+    /// `Updater.cs` 原来只用 try/catch 覆盖"解析失败"，**不覆盖"语义不安全"**。
+    ///
+    /// 这条路径是真实原语：本地清单里的相对路径会被规划器当成 `Move` 的**改名来源**
+    /// （`UpdatePlanner.cs` 的 `Full(root, same.RelativePath())`），而 `PlanAction.Move` 执行的是
+    /// 真的 `Fs.Place(来源 → 目标)` —— 越界路径 = 把安装根**之外**的文件搬进树（这里就是那个诱饵）。
+    /// </summary>
+    [Fact]
+    public void Update_WhenTheLocalManifestHasAnEscapingPath_RefusesBeforeTouchingAnything()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        // 根外诱饵：内容**正好等于** bin/b.dll 的目标内容，于是它会成为那个"改名来源"。
+        // 用就地模式（而不是本类默认的暂存模式）—— 暂存模式只是把改名**推迟**给 applier，
+        // 就地模式则当场执行 `Fs.Place(来源 → 目标)`：修好之前这一轮会把诱饵搬进树，
+        // 并收敛成 `Updated`（实测过，下面两条断言都会红）。
+        var decoy = Path.Combine(tmp.Path, "b.dll");
+        File.WriteAllText(decoy, TestSupport.Big("B1"), new System.Text.UTF8Encoding(false));
+        var outsideBefore = TreeFingerprint(tmp.Path, skip: e.Client);   // 根外（除 client 之外）的全部文件
+
+        TamperManifestPath(Path.Combine(e.Client, "manifest.xml"), "..");
+
+        var result = new ClientUpdater(Cfg(e) with { ApplyMode = ApplyMode.InPlace }).Run();
+
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+        Assert.Equal(UpdateReasons.PathEscape, result.Reason);
+        Assert.Contains("本地清单", result.Detail);
+        AssertTreeIsVersion(e.Client, e.V1Dir, e.M1, manifestIsTampered: true);   // 树一个字节没动
+        Assert.False(StageLayout.HasPendingPlan(e.Client));
+        Assert.True(File.Exists(decoy), "安装根之外的文件被搬走了");
+        Assert.Equal(outsideBefore, TreeFingerprint(tmp.Path, skip: e.Client));   // 根外一个字节没动
     }
 
     [Fact]
@@ -560,7 +599,22 @@ public class StagedApplierTests
             .OrderBy(r => r, StringComparer.Ordinal)
             .ToList();
 
-    private static void AssertTreeIsVersion(string client, string versionDir, string localManifest)
+    /// <summary>整棵子树的 <c>(相对路径, MD5)</c> 清单 —— 用来断言"一个字节都没动"。</summary>
+    private static string TreeFingerprint(string root, string? skip = null)
+    {
+        var prefix = skip is null ? null : skip + Path.DirectorySeparatorChar;
+        var lines = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(p => prefix is null || !p.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(p => Path.GetRelativePath(root, p).Replace('\\', '/') + "=" + TestSupport.Md5File(p))
+            .OrderBy(x => x, StringComparer.Ordinal);
+        return string.Join("\n", lines);
+    }
+
+    /// <param name="manifestIsTampered">
+    /// 本地清单是被故意改过的（信任边界的用例）：只比"受管文件是否原样"，**不**要求清单字节等于基线。
+    /// </param>
+    private static void AssertTreeIsVersion(string client, string versionDir, string localManifest,
+        bool manifestIsTampered = false)
     {
         var actual = RelativeFiles(client)
             .Where(r => !r.Equals("manifest.xml", StringComparison.OrdinalIgnoreCase))
@@ -573,6 +627,8 @@ public class StagedApplierTests
             Assert.Equal(TestSupport.Md5File(Path.Combine(versionDir, rel.Replace('/', sep))),
                 TestSupport.Md5File(Path.Combine(client, rel.Replace('/', sep))));
 
-        Assert.Equal(TestSupport.Md5File(localManifest), TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
+        if (!manifestIsTampered)
+            Assert.Equal(TestSupport.Md5File(localManifest),
+                TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
     }
 }

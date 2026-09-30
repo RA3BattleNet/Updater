@@ -219,6 +219,17 @@ public sealed class Updater
             }
         }
 
+        // 本地清单**也是数据**：它由上一次写下来，同样可能被篡改、位翻转、或从旧备份还原。
+        // 它的相对路径**确实参与落地** —— 规划器用它给出 `Move` 的**改名来源**（`UpdatePlanner.cs` 的
+        // `Full(root, same.RelativePath())`），`PlanAction.Move` 会真的把那个路径搬进树里。
+        // 所以边界与远端那份一模一样，而且同样必须在**动任何东西之前**（§4.14）。
+        // 远端那道在上面，这道是它缺的另一半；解析失败（没有 `local` 对象）时本校验自然跳过。
+        if (local is not null
+            && PathSafety.FirstUnsafe(local.Manifest.Files.Select(f => (string?)f.RelativePath())) is { } unsafeLocal)
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.PathEscape,
+                $"本地清单里有逃出安装根的路径（例：{unsafeLocal}）：整个更新拒绝执行",
+                manifest.HttpVersion ?? string.Empty);
+
         var plan = UpdatePlanner.Build(remote, local, _cfg, _patchToolAvailable);
         tally.Total = plan.Total;
         tally.Skip = plan.Unchanged;
