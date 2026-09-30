@@ -57,14 +57,16 @@ Client.Applier.exe --root <安装目录> [--cache-dir <目录>] [--manifest-file
 
 宿主一般不用手写这些参数：`StagedApplier.BuildApplyCommand(exe, applierConfig)` 会生成它们
 （并把"我是谁"的身份三件套自动填好）。**不认识的参数会被忽略**（向前兼容：现场这个 exe 可能还是旧的，
-而参数是新版库生成的）。解析实现只有一份 —— 在库里的 `ApplierConfig.FromArgs`。
+而参数是新版库生成的）—— 这就是库里的 `ApplierConfig.FromArgs(args, UnknownArgPolicy.Ignore)`：
+**解析实现只有一份**，`Client.CLI --apply` 用的是同一个函数的 `UnknownArgPolicy.Strict`（白名单之外一律拒）。
 
 退出码：`0` 已落地 / 本来就没东西要落地 ｜ `1` 没落地（原因见 `update.log` 的 `C` 行）｜ `2` 参数错误。
 
 ## 它**不做**什么（都是故意的）
 
-- **不画窗口**：窗口归宿主。本 exe 只把事实报出去（`IProgress<UpdateProgress>`：阶段 / 计数 / 文件名 /
-  等待已过时长与时限），宿主拿它自己算进度条、状态、超时。
+- **不画窗口**：窗口归宿主。本 exe 只把事实报出去 —— `IProgress<UpdateProgress>` 的阶段标识、计数、文件名、
+  动作名（`Action`）、以及 `wait` 阶段的已过时长/时限（字段表见 [`../USAGE.md`](../USAGE.md) §2.2），
+  宿主拿它自己算进度条、状态、超时。
 - **不联网**：输入只有阶段一留在缓存里的那份清单原文；它不在就**拒绝落地**，绝不联网重取
   （落地的是"已经规划并暂存好的那一版"，不是"线上最新版"）。
 - **不打印结果**：stdout 不是本 exe 的契约；机器可读的结论在 `update.log`

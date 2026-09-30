@@ -1,4 +1,4 @@
-# Ra3.BattleNet.Updater —— 使用说明
+﻿# Ra3.BattleNet.Updater —— 使用说明
 
 > 面向**引用本库的开发者**：怎么接、怎么用、会拿到什么、该怎么处理。
 > 子项目参数细节见同目录下各自的 README：
@@ -8,7 +8,7 @@
 ## 目录
 
 - §0 它是什么 · §1 目录结构
-- **接入方只看 §2**：§2.1 怎么引用 · §2.2 最小用法 · §2.3 返回值与怎么处理 · §2.4 取消与超时 ·
+- **接入方只看 §2**：§2.1 怎么引用 · §2.2 最小用法（含**进度回调字段表**）· §2.3 返回值与怎么处理 · §2.4 取消与超时 ·
   §2.5 配置项 · §2.6 日志（格式是契约）· §2.7 独立进程壳（宿主不是 C# 时）·
   **§2.8 宿主集成：两条落地路线与「退出后转交 applier」**（含不支持的场景 / 宿主的义务 / 可选代重启）
 - 发布侧：§3 服务端流水线 · §4 协议与清单格式
@@ -90,11 +90,29 @@ var cfg = new UpdateConfig
 };
 
 var progress = new Progress<UpdateProgress>(p =>
-    Console.WriteLine($"[{p.Current}/{p.Total}] {p.FileName} {p.Stage}"));
+    p.Stage == UpdateStage.Wait
+        ? Console.WriteLine($"正在等待其他程序退出… 已 {p.WaitElapsed?.TotalSeconds:F0}s / {p.WaitTimeout?.TotalSeconds:F0}s")
+        : Console.WriteLine($"[{p.Stage}] {p.Current}/{p.Total} {p.FileName} {p.Action}"));
 
 UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 // 或：UpdateResult r = await new Updater(cfg).RunAsync(progress, ct);   // 可取消
 ```
+
+**进度回调里有什么（`IProgress<UpdateProgress>`）**
+
+回调给的是**事实字段**，不是 UI 语义（库里没有"百分比"这种东西）。宿主拿它自己算进度条、算状态文字、判超时，或者干脆不用，都是宿主的事。
+
+| 字段 | 含义 |
+|---|---|
+| `Stage` | **阶段标识**（封闭集合、只增不改）：`check` 核对 · `move` 纯改名 · `patch` 打补丁 · `download` 完整下载 · `wait` 等树静默 · `apply` 落地提交 · `done` 收尾 |
+| `Current` / `Total` | 该阶段内的计数（`done` 时报的是这一轮的最终计数） |
+| `FileName` | 当前文件名 / 相对路径（没有具体文件时为空） |
+| `Action` | 该文件被判的**动作**：`skip` / `move` / `patch` / `full`。**动作不放在 `Stage` 里**（历史实现混在一起，宿主只能靠猜）；没有具体文件时为空 |
+| `WaitElapsed` / `WaitTimeout` | 仅在 `Stage == wait` 时有值：已等多久 / 时限（`ApplierQuiescenceTimeout`）—— 宿主据此显示"正在等待其他程序退出… 已 Ns" |
+
+- **`Stage = done` 每轮收尾都会报一次**，此后这一轮不再有进度；结论本身走 `UpdateResult`（§2.3）。
+- `Stage` 与字段都**只增不改**（新字段一律带默认值）：宿主遇到不认识的 `Stage` 应当当"其它阶段"处理，不要抛。
+- 阶段一与 applier 用的是**同一个回调类型**，所以宿主可以用一套 UI 覆盖"下载/补丁"和"等待/落地"两段。
 
 ### 2.3 返回值与怎么处理
 
