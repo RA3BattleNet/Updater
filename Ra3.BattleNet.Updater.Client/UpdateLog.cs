@@ -60,6 +60,14 @@ internal sealed class UpdateLog : IDisposable
     /// </summary>
     public void RunStart(string utcIso) => Write($"S\t{RunId}\t{utcIso}");
 
+    /// <summary>
+    /// 一行**上下文**（`C` 行型，新增行型、不改任何既有行型与列，§4.11 允许）。
+    /// 落地阶段用它把**实际使用**的 `root` / `cacheDir` / `manifestFile` 打在日志最前面：
+    /// applier 与阶段一是两个进程、两个配置类型，"两边指向的不是同一处"是唯一会真正出事的情形
+    /// （锁与阶段一留下的清单都在缓存目录里）。出错时第一眼就要能核对（§4.8）。
+    /// </summary>
+    public void Context(string name, string value) => Write($"C\t{RunId}\t{name}\t{value}");
+
     /// <summary>每文件一行。</summary>
     public void File(
         string uuid, string? oldMd5, string? oldPath, string? newMd5, string? newPath,

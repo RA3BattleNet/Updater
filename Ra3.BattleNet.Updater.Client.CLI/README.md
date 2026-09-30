@@ -28,13 +28,20 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
                             于是**首次更新 / 重装后第一次运行**会直接撞 --threshold-* 的保险丝。
                             只在做对照实验时才关
 
-暂存更新的落地（宿主退出后跑；库不自己 spawn 进程）：
+暂存更新的落地（宿主退出后跑；库不自己 spawn 进程）：**零网络**
   --apply                   只做落地：把 UpdaterStage 里已就绪的内容换上去
+  --root <目录>             安装根目录（必填）
+  --manifest-file <路径>    阶段一留在缓存里的远端清单原文
+                            （默认 <cache-dir>/manifest.remote.xml；不在就拒绝落地，**不联网重取**）
   --wait-for-pid <PID>      --apply 时先等这个进程退出（宿主把自己的 PID 传进来）
   --wait-for-name <名字>    连同 PID 一起认宿主（PID 会被复用，光凭 PID 认不准）
   --wait-for-start <ticks>  宿主的启动时刻，唯一实例标识（后两个由 BuildApplyCommand 自动填）
   --quiescence-timeout <秒> --apply 时等树静的时限（默认 600）
   --poll-seconds <秒>       --apply 时的轮询间隔（默认 2）
+
+注意：`--manifest-url` / `--tools-dir` / `--base-url` / `--fallback` / `--concurrency` /
+      `--threshold-*` / `--verify-unchanged` 等**只属于阶段一**；在 `--apply` 下会被**拒绝**
+      （退出码 2）而不是静默忽略 —— 落地阶段不联网，它的输入只有缓存里的那份清单。
 
 落地成功后可选地把宿主拉起来（宿主一般用 BuildApplyCommand 自动带上）：
   --restart <exe>           要拉起的可执行文件
@@ -61,7 +68,7 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> --json
 
 # ② 暂存 + 宿主退出后落地（自更新）
 Client.CLI --root <安装目录> --manifest-url <清单地址> --apply-mode staged --json   # 退出码 3
-Client.CLI --apply --root <安装目录> --manifest-url <清单地址> --wait-for-pid <宿主PID>
+Client.CLI --apply --root <安装目录> --wait-for-pid <宿主PID>                        # 零网络，读缓存里的清单
 ```
 
 宿主集成（谁在什么时候挂 applier、怎么收尾）见 [`../USAGE.md`](../USAGE.md) §2.8。

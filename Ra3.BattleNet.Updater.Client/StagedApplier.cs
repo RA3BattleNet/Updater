@@ -13,14 +13,19 @@ namespace Ra3.BattleNet.Updater.Client;
 ///   ③ **每步幂等** —— 状态从"磁盘 + 已知 hash"推导（复用 <see cref="StageRecovery"/>），
 ///      所以"中途被杀"之后，下次运行本身就是它的恢复过程。
 ///
-/// 【必须】本地 manifest 与 ETag **只在本类落地成功之后**才推进（§12.5）：阶段一不写它们。
+/// 【必须】本类是**零网络**的：它只认阶段一留在缓存里的那份远端清单原文（<see cref="ApplierConfig.ManifestFile"/>）。
+/// 落地发生在宿主退出之后、无人值守，那条路上不该有"网络抖动导致更新失败"这种失败模式；
+/// 而且它要落地的是**已经规划并暂存好的那一版**，不是"线上最新版"。所以配置类型
+/// <see cref="ApplierConfig"/> 里**根本没有**清单地址这一项。
+///
+/// 【必须】本地 manifest **只在本类落地成功之后**才推进（§12.5）：阶段一不写它。
+/// 落地阶段**不写 ETag**（本地状态是"会不会再取一次，不花内容字节"，见 §12.5）。
 /// </summary>
 public sealed class StagedApplier
 {
-    private readonly UpdateConfig _cfg;
-    private HttpFetcher? _fetcher;
+    private readonly ApplierConfig _cfg;
 
-    public StagedApplier(UpdateConfig cfg) => _cfg = cfg;
+    public StagedApplier(ApplierConfig cfg) => _cfg = cfg;
 
     public UpdateResult Run(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
         => RunAsync(progress, ct).GetAwaiter().GetResult();
@@ -48,16 +53,7 @@ public sealed class StagedApplier
         UpdateResult result;
         using (lockStream)
         {
-            try
-            {
-                using var fetcher = new HttpFetcher(_cfg.MaxConcurrency);
-                _fetcher = fetcher;
-                result = await CoreAsync(progress, ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                _fetcher = null;
-            }
+            result = await CoreAsync(progress, ct).ConfigureAwait(false);
         }
 
         // 必须**在锁释放之后**才拉起宿主：否则刚起来的宿主第一件事跑更新就会拿到 already_running（§12.5）。
@@ -101,22 +97,31 @@ public sealed class StagedApplier
         var sw = Stopwatch.StartNew();
         using var log = new UpdateLog(_cfg.ResolveLogPath(),
             $"{DateTime.UtcNow:yyyyMMddTHHmmss}-{Environment.ProcessId}-apply", _cfg.MaxLogBytes);
+        // §4.8：applier 与阶段一是两个进程、两个配置类型。"两边指向的不是同一处"是**唯一**会真正出事的情形
+        // （更新锁与阶段一留下的远端清单都在缓存目录里），所以把实际用到的三样打在**本轮的日志最前面**，
+        // 出错时第一眼核对。放在 S 行之前是有意的：它是"这一轮在哪儿干活"的入口信息，不是结果。
+        log.Context("root", root);
+        log.Context("cacheDir", Path.GetFullPath(_cfg.ResolveCacheDir()));
+        log.Context("manifestFile", Path.GetFullPath(_cfg.ResolveManifestFile()));
         log.RunStart(DateTime.UtcNow.ToString("O"));
 
         var plan = StageLayout.LoadPlan(root);
         if (plan is null)
             return Finish(log, sw, string.Empty, UpdateOutcome.UpToDate, UpdateReasons.None,
                 $"没有待提交的暂存更新（{StageLayout.DirName}/{StageLayout.PlanFileName} 不存在）",
-                0, 0, 0, 0, string.Empty);
+                0, 0, 0, 0);
 
-        // 远端清单要它做两件事：验证暂存内容、以及"落地成功后原样写入本地清单"（§3.4）。
-        // 优先用阶段一留在缓存里的字节 —— 那样离线也能落地；缓存不在才联网重取（顺手拿到 ETag）。
-        var (remoteBytes, remoteHash, httpVersion, etag) = await LoadRemoteManifestAsync(ct).ConfigureAwait(false);
+        // 【必须】输入的**唯一来源**是阶段一留在缓存里的那份远端清单原文（零网络）。
+        // 它要做两件事：验证暂存内容、以及"落地成功后原样写入本地清单"（§3.4）。
+        // 文件不在 ⇒ 拒绝落地（本地清单不被改写、暂存内容原样保留）—— **不联网重取**：
+        // 那会把"落地已暂存的那一版"偷偷变成"落地线上最新版"，而且把无人值守的落地阶段
+        // 变成一个会因网络抖动而失败的阶段。
+        var (remoteBytes, remoteHash) = LoadRemoteManifest();
         var knownHash = remoteHash.Length > 0 ? remoteHash : plan.ManifestHash;
         if (remoteBytes is null)
             return Finish(log, sw, knownHash, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable,
-                "取不到远端清单：拒绝落地（本地清单不会被改写，暂存内容原样保留）",
-                plan.Actions.Count, 0, 0, 0, httpVersion);
+                $"取不到远端清单（{_cfg.ResolveManifestFile()} 不在）：拒绝落地（本地清单不会被改写，暂存内容原样保留）",
+                plan.Actions.Count, 0, 0, 0);
 
         var remote = RemoteModel(remoteBytes);
 
@@ -128,20 +133,22 @@ public sealed class StagedApplier
         if (unsafePath is not null)
             return Finish(log, sw, knownHash, UpdateOutcome.Failed, UpdateReasons.PathEscape,
                 $"清单或计划里有逃出安装根的路径（例：{unsafePath}）：拒绝落地",
-                plan.Actions.Count, 0, 0, 0, httpVersion);
+                plan.Actions.Count, 0, 0, 0);
 
-        // 计划是**提示**：判据是"远端清单的字节哈希是否还等于计划里记的那个"（§12.4）。
+        // 计划是**提示**：判据是"缓存里那份清单的字节哈希是否还等于计划里记的那个"（§12.4）。
+        // 正常流程下两边都出自阶段一，所以这里只会在"缓存被替换/损坏"时触发 —— 保留它作为一致性自检。
         if (!string.Equals(remoteHash, plan.ManifestHash, StringComparison.OrdinalIgnoreCase))
             return Finish(log, sw, knownHash, UpdateOutcome.Failed, UpdateReasons.StagedPlanStale,
-                $"远端清单已变（计划 {Short(plan.ManifestHash)} / 远端 {Short(remoteHash)}）：本轮不落地，等下一次更新重新规划",
-                plan.Actions.Count, 0, 0, 0, httpVersion);
+                $"缓存里的远端清单与计划对不上（计划 {Short(plan.ManifestHash)} / 缓存 {Short(remoteHash)}）：" +
+                "本轮不落地（缓存被替换或损坏了）；下一次更新会重新规划并补齐",
+                plan.Actions.Count, 0, 0, 0);
 
         // 静默判据（§12.5）：宿主 PID 退出 + 树内没有进程在跑。超时就什么都不动。
         var quiet = await WaitForQuiescenceAsync(root, remote, progress, ct).ConfigureAwait(false);
         if (!quiet)
             return Finish(log, sw, remoteHash, UpdateOutcome.Failed, UpdateReasons.TreeBusy,
                 $"等待 {_cfg.ApplierQuiescenceTimeout.TotalSeconds:F0}s 仍有进程在使用这棵树：本轮不落地",
-                plan.Actions.Count, 0, 0, 0, httpVersion);
+                plan.Actions.Count, 0, 0, 0);
 
         // 先修：崩在两次改名之间 / 暂存内容丢了的，把目标先恢复成"整的"（§12.6）
         foreach (var a in plan.Actions.Where(x => Classify(root, x) == StageFileAction.RestoreBackup))
@@ -155,7 +162,7 @@ public sealed class StagedApplier
         if (blocked.Count > 0)
             return Finish(log, sw, remoteHash, UpdateOutcome.Failed, UpdateReasons.StagedContentMissing,
                 $"{blocked.Count} 个动作的暂存内容缺失或已损坏（例：{blocked[0].RelativePath}）：本轮不落地，等下一次更新补齐",
-                plan.Actions.Count, 0, 0, 0, httpVersion);
+                plan.Actions.Count, 0, 0, 0);
 
         // 上一轮的备份到这一刻才清（回退窗口止于"本次落地开始"，§12.7）
         StageLayout.ClearOld(root);
@@ -202,16 +209,19 @@ public sealed class StagedApplier
         if (failed > 0)
             return Finish(log, sw, remoteHash, UpdateOutcome.Failed, UpdateReasons.IoError,
                 "有文件落地失败：本地清单未改写（下次运行会按 §12.6 的表续做）",
-                total, skipped, moved, failed, httpVersion);
+                total, skipped, moved, failed);
 
-        // 全部落地成功 —— 到这里才推进本地清单与 ETag（§12.5），然后清掉暂存内容与计划。
+        // 全部落地成功 —— 到这里才推进本地清单（§12.5），然后清掉暂存内容与计划。
+        // 【必须】不写 ETag：它只服务于"If-None-Match 那次清单请求"，落地阶段既然不联网，
+        // 就没有 ETag 可写（缓存里的旧 ETag 属于**上一版**，更不能当成本次的结果写下去）。
+        // 唯一的后果是"落地之后第一次更新会话多取一遍清单正文"（约 185 KB gzip），
+        // 那一次会话自己会补上 ETag，随即收敛。
         WriteLocalManifest(remoteBytes);
-        SaveEtag(etag);
         StageLayout.ClearNew(root);
         StageLayout.DeletePlan(root);
 
         return Finish(log, sw, remoteHash, UpdateOutcome.Updated, UpdateReasons.None,
-            $"已落地 {total} 个动作（其中 {skipped} 个本来就已就位）", total, skipped, moved, 0, httpVersion);
+            $"已落地 {total} 个动作（其中 {skipped} 个本来就已就位）", total, skipped, moved, 0);
     }
 
     // ------------------------------------------------------------------ 静默判据
@@ -375,29 +385,25 @@ public sealed class StagedApplier
 
     // ------------------------------------------------------------------ 清单与日志
 
-    private async Task<(byte[]? Bytes, string Hash, string HttpVersion, string? ETag)> LoadRemoteManifestAsync(
-        CancellationToken ct)
+    /// <summary>
+    /// 读阶段一留在缓存里的**远端清单原文**。**不联网**：文件不在就返回 <c>null</c>，
+    /// 调用方据此拒绝落地（`manifest_unavailable`）。
+    /// </summary>
+    private (byte[]? Bytes, string Hash) LoadRemoteManifest()
     {
-        var cachePath = Path.Combine(Path.GetFullPath(_cfg.ResolveCacheDir()), "manifest.remote.xml");
-        if (Fs.Exists(cachePath))
-        {
-            var cached = Fs.ReadAllBytes(cachePath);
-            return (cached, Hashing.Md5(cached), string.Empty, null);
-        }
-
-        var got = await _fetcher!.GetManifestAsync(_cfg.ManifestUrl, null, ct).ConfigureAwait(false);
-        if (!got.Ok || got.Content is null) return (null, string.Empty, got.HttpVersion ?? string.Empty, null);
-
-        var bytes = got.Content;
-        var hash = Hashing.Md5(bytes);
-        Fs.WriteAllBytes(cachePath, bytes);   // 与阶段一一致：缓存里留一份远端原文
-        return (bytes, hash, got.HttpVersion ?? string.Empty, got.ETag);
+        var path = Path.GetFullPath(_cfg.ResolveManifestFile());
+        if (!Fs.Exists(path)) return (null, string.Empty);
+        var bytes = Fs.ReadAllBytes(path);
+        return (bytes, Hashing.Md5(bytes));
     }
 
-    /// <summary>远端 manifest 的字节已经（或刚刚）落在缓存里；<see cref="ManifestModel"/> 要一个路径，用它即可。</summary>
+    /// <summary>
+    /// 交给 <see cref="ManifestModel"/>（它要一个路径）。原地写回同一份字节是幂等的：
+    /// 那个路径**就是**它的来源，写回去只是把"读到的内容"再落一次，不会改内容。
+    /// </summary>
     private ManifestModel RemoteModel(byte[] bytes)
     {
-        var path = Path.Combine(Path.GetFullPath(_cfg.ResolveCacheDir()), "manifest.remote.xml");
+        var path = Path.GetFullPath(_cfg.ResolveManifestFile());
         Fs.WriteAllBytes(path, bytes);
         return new ManifestModel(path);
     }
@@ -411,13 +417,6 @@ public sealed class StagedApplier
         Fs.Place(tmp, local);
     }
 
-    private void SaveEtag(string? etag)
-    {
-        // 用缓存里的清单落地时拿不到 ETag → 不写，下次做一次完整 GET（无害）
-        if (string.IsNullOrEmpty(etag)) return;
-        Fs.WriteAllText(Path.Combine(Path.GetFullPath(_cfg.ResolveCacheDir()), "manifest.etag"), etag!);
-    }
-
     private void LogFile(UpdateLog log, StagedAction a, string action, int status, string reason, long t0)
     {
         log.File(string.Empty, null, a.Kind == StagedActionKind.Move ? a.MoveFromRelative : null,
@@ -426,16 +425,15 @@ public sealed class StagedApplier
     }
 
     private UpdateResult Finish(UpdateLog log, Stopwatch sw, string manifestHash, UpdateOutcome outcome,
-        string reason, string detail, int total, int skipped, int moved, int failed, string httpVersion)
+        string reason, string detail, int total, int skipped, int moved, int failed)
     {
         sw.Stop();
-        var payload = _fetcher?.PayloadBytes ?? 0;
-        var wire = _fetcher?.WireBytes ?? 0;
+        // 零网络：requests / payload / wire 一律 0（列数与列含义**不变**，见 §4.11 —— 分析脚本按列读）。
         log.Run(manifestHash, total, skipped, moved, 0, 0, failed, 0, (long)sw.Elapsed.TotalMilliseconds,
-            outcome.ToString(), _fetcher?.Requests ?? 0, payload, wire);
+            outcome.ToString(), 0, 0, 0);
 
         return new UpdateResult(outcome, reason, total, skipped, moved, 0, 0, failed, 0, sw.Elapsed, detail,
-            httpVersion, payload, wire, _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0);
+            string.Empty, 0, 0, 0, 0);
     }
 
     /// <summary>
@@ -443,7 +441,7 @@ public sealed class StagedApplier
     /// 由宿主决定怎么挂：退出路径里启动、计划任务、或一次性开机项。
     /// 【必须】不要重定向 stdio：管道会随宿主退出而失效，applier 写日志就会出错。
     /// </summary>
-    public static ProcessStartInfo BuildApplyCommand(string applierExecutable, UpdateConfig cfg)
+    public static ProcessStartInfo BuildApplyCommand(string applierExecutable, ApplierConfig cfg)
     {
         var psi = new ProcessStartInfo(Path.GetFullPath(applierExecutable))
         {
@@ -455,10 +453,11 @@ public sealed class StagedApplier
         foreach (var (name, value) in new (string, string?)[]
                  {
                      ("--root", Path.GetFullPath(cfg.RootPath)),
-                     ("--manifest-url", cfg.ManifestUrl),
+                     // 【必须】没有 --manifest-url / --tools-dir / 并发与备用地址：落地阶段不联网，也不下内容。
+                     // 它唯一的输入是阶段一留在缓存里的那份清单原文（默认路径由两边共用的默认值求出）。
+                     ("--manifest-file", cfg.ManifestFile),
                      ("--local-manifest", cfg.LocalManifestPath),
                      ("--cache-dir", cfg.CacheDir),
-                     ("--tools-dir", cfg.ToolsDir),
                      ("--log", cfg.LogPath),
                      ("--wait-for-pid", Environment.ProcessId.ToString()),
                      ("--wait-for-name", SelfProcessName()),
@@ -469,6 +468,7 @@ public sealed class StagedApplier
                      ("--restart-cwd", _RestartCwd(cfg)),
                      ("--restart-delay", cfg.RestartAfterApply ? ((int)cfg.RestartDelay.TotalSeconds).ToString() : null),
                      ("--quiescence-timeout", ((int)cfg.ApplierQuiescenceTimeout.TotalSeconds).ToString()),
+                     ("--poll-seconds", ((int)cfg.ApplierPollInterval.TotalSeconds).ToString()),
                  })
         {
             if (string.IsNullOrEmpty(value)) continue;
@@ -479,13 +479,13 @@ public sealed class StagedApplier
         return psi;
     }
 
-    private static string? _RestartExe(UpdateConfig cfg) =>
+    private static string? _RestartExe(ApplierConfig cfg) =>
         cfg.RestartAfterApply ? (cfg.RestartExecutable ?? Environment.ProcessPath) : null;
 
-    private static string? _RestartArgs(UpdateConfig cfg) =>
+    private static string? _RestartArgs(ApplierConfig cfg) =>
         cfg.RestartAfterApply ? (cfg.RestartArguments ?? SelfCommandLineTail()) : null;
 
-    private static string? _RestartCwd(UpdateConfig cfg) =>
+    private static string? _RestartCwd(ApplierConfig cfg) =>
         cfg.RestartAfterApply ? (cfg.RestartWorkingDirectory ?? Environment.CurrentDirectory) : null;
 
     /// <summary>

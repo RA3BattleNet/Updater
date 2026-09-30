@@ -375,8 +375,13 @@ internal sealed class TestHttpServer : IDisposable
         Interlocked.Add(ref _wire, head.Length + body.Length);
     }
 
+    private bool _disposed;
+
+    /// <summary>幂等：有的用例要**半路把服务端关掉**（证明某条路径真的不联网），随后又由 <c>using</c> 再释放一次。</summary>
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _cts.Cancel();
         try { _listener.Stop(); } catch { /* ignore */ }
         _cts.Dispose();

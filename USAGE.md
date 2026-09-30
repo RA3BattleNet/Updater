@@ -200,13 +200,18 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
 库不自己 spawn 进程）：
 
 ```
-Client.CLI --apply --root <安装目录> --manifest-url <清单地址> [--wait-for-pid <宿主PID>] [--quiescence-timeout 600] [--poll-seconds 2] [--json]
+Client.CLI --apply --root <安装目录> [--manifest-file <路径>] [--wait-for-pid <宿主PID>] [--quiescence-timeout 600] [--poll-seconds 2] [--json]
 ```
+`--apply` 是**零网络**的：它不认 `--manifest-url`（给了会直接报错，退出码 2），只读阶段一留在
+缓存里的那份清单原文（`--manifest-file`，默认 `<cache-dir>/manifest.remote.xml`）。那份文件不在
+⇒ **拒绝落地**（`reason=manifest_unavailable`，本地清单不被改写、暂存内容原样保留），**不联网重取** ——
+落地的是"已经规划并暂存好的那一版"，不是"线上最新版"。
 `--wait-for-pid` 认宿主时连**进程名与启动时刻**一起比（`--wait-for-name` / `--wait-for-start`）——
 PID 会被系统复用，只认 PID 可能把"抢到同一个 PID 的无关进程"当成宿主还在，白等到超时。
 后两个参数由 `BuildApplyCommand` **自动填**，宿主不用管。
 
-退出码 `0` = 已落地。宿主可以直接用 `StagedApplier.BuildApplyCommand(exe, cfg)` 生成这条命令。
+退出码 `0` = 已落地。宿主可以直接用 `StagedApplier.BuildApplyCommand(exe, applierCfg)` 生成这条命令
+（注意第二个参数是 **`ApplierConfig`**，不是 `UpdateConfig`）。
 
 ### 2.8 宿主集成：两条落地路线与「退出后转交 applier」
 
@@ -245,14 +250,19 @@ var cfg = new UpdateConfig
     RootPath = installDir,
     ManifestUrl = manifestUrl,
     ApplyMode = ApplyMode.Staged,
-    ApplierQuiescenceTimeout = TimeSpan.FromMinutes(10),
 };
 
 var r = new Updater(cfg).Run(progress);
 if (r.PendingRestart)
 {
     // 【要点 1】先挂 applier，**再**开始退出：它会等我们的 PID，所以现在挂不会打架。
-    Process.Start(StagedApplier.BuildApplyCommand(applierExePath, cfg));
+    // 落地用的是**另一个配置类型** ApplierConfig（它没有清单地址：落地阶段零网络）。
+    var applierCfg = new ApplierConfig
+    {
+        RootPath = installDir,
+        ApplierQuiescenceTimeout = TimeSpan.FromMinutes(10),
+    };
+    Process.Start(StagedApplier.BuildApplyCommand(applierExePath, applierCfg));
 
     // 【要点 2】把「该重启了」交给你的主线程去处理；不要在更新线程里 Environment.Exit。
     RequestShutdown("update staged");    // 你自己的机制：消息 / Dispatcher / 原子标志
@@ -260,6 +270,11 @@ if (r.PendingRestart)
 ```
 
 `applierExePath` 是宿主自己发布的 `Client.CLI` 可执行文件（或用 `dotnet Client.CLI.dll`）。
+
+**两个配置类型为什么是分开的**：阶段一（`UpdateConfig`）要联网、要工具目录、要并发；
+落地阶段（`ApplierConfig`）是宿主退出后**无人值守**跑的另一个进程，它只能读缓存里那一版清单。
+把二者合成一个类型，就会出现"applier 被迫要求一个 URL"这种设计（B-1 之前就是这样）。
+分开之后，"applier 不联网"是**类型层面**的保证，而不是靠约定：传错会在编译期就报错。
 
 **要点**
 
@@ -270,7 +285,12 @@ if (r.PendingRestart)
    **别指望 `UseShellExecute = true`**：它**不保证**脱离作业，代价却是失去 .NET 的正确参数转义（`UseShellExecute=true` 时 `ArgumentList` 不能用，得自己拼命令行 —— 我们的路径又长、又带空格和中文），还可能出现控制台窗口。不值当。
 5. **落地要树静默**：宿主必须**真的退出**（applier 等的是宿主 PID），并且**清单里列出的 `.exe`** 不能在树内还在跑。扫描范围就是这两条 —— 树内**不被 manifest 管理**的 exe（自备工具、临时进程、WebView2 子进程等）**不会**被判为繁忙，它们的影响是"占着文件导致改名失败"，那时返回 `io_error` 而非 `tree_busy`。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。（判据原文见 `AGENT.md` §12.5）
 6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行会自动续做；最坏是「这次没生效」，不会「半个版本」。
-7. **离线也能落地**：阶段一把远端清单原文留在缓存里，applier 用它校验暂存内容，**落地阶段零网络**；缓存不在才联网重取，那条路上顺手拿到 ETag 并写下来。用缓存离线落地时拿不到 ETag 就不写 —— 下一轮做一次完整 GET，无害。
+7. **离线也能落地，而且落地阶段根本没有网络这条路**：阶段一把远端清单原文留在缓存里，applier 只读它
+   （`ApplierConfig.ManifestFile`，默认 `<cache-dir>/manifest.remote.xml`）。那份文件不在 ⇒ 拒绝落地
+   （`reason=manifest_unavailable`）、本地清单不被改写、暂存内容原样留着 —— **绝不联网重取**
+   （那会把"落地已暂存的那一版"偷偷变成"落地线上最新版"，也让无人值守的落地多一条因网络抖动而失败的路径）。
+   落地**不写 ETag**（它只服务于"下次清单请求能不能 304"）：后果仅是落地后第一次更新会话多取一遍清单正文
+   （约 185 KB gzip），那一次会话自己会把 ETag 补上，随即收敛。
 8. **两种模式互斥**：存在待提交计划时，`InPlace` 会被拒（`reason=pending_staged_apply`）。
 9. **回退窗口**：落地后 `old/` 留着上一版备份，到**下一轮暂存开始时**（且上次已落地）自动清掉。
 10. **applier 不负责重启宿主**：落地完成后没有任何人会把程序拉起来 —— 那是宿主的责任（外层启动器 / 计划任务 / 让用户再点一次）。要 applier 代劳得另加开关。
@@ -303,9 +323,14 @@ var cfg = new UpdateConfig
     RootPath = installDir,
     ManifestUrl = manifestUrl,
     ApplyMode = ApplyMode.Staged,
+};
+
+var applierCfg = new ApplierConfig
+{
+    RootPath = installDir,
     RestartAfterApply = true,                        // 只开这一个开关就够了
 };
-Process.Start(StagedApplier.BuildApplyCommand(applierExePath, cfg));
+Process.Start(StagedApplier.BuildApplyCommand(applierExePath, applierCfg));
 ```
 
 `BuildApplyCommand` 是在**宿主进程里**执行的，所以它自动填好三样：要拉起的 exe（宿主自己）、

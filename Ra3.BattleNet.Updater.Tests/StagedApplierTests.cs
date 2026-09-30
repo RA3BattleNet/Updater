@@ -54,12 +54,23 @@ public class StagedApplierTests
         return new Env(client, server, v1, v2, m1, m2, http);
     }
 
+    /// <summary>阶段一（更新会话）的配置。</summary>
     private static UpdateConfig Cfg(Env e) => new()
     {
         RootPath = e.Client,
         CacheDir = TestSupport.TestCacheDir(e.Client),
         ManifestUrl = e.Http.BaseUrl + "manifest.xml",
         ApplyMode = ApplyMode.Staged,
+    };
+
+    /// <summary>
+    /// 阶段二/三（落地）的配置：**另一个类型** <see cref="ApplierConfig"/>。
+    /// 它没有清单地址、也没有并发/工具目录 —— 那些只属于阶段一（§12.5：落地零网络）。
+    /// </summary>
+    private static ApplierConfig Applier(Env e) => new()
+    {
+        RootPath = e.Client,
+        CacheDir = TestSupport.TestCacheDir(e.Client),
         ApplierPollInterval = TimeSpan.FromSeconds(1),
         ApplierQuiescenceTimeout = TimeSpan.FromSeconds(20),
     };
@@ -76,7 +87,7 @@ public class StagedApplierTests
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);                        // 阶段一没动树
 
-        var applied = new StagedApplier(Cfg(e)).Run();
+        var applied = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
         Assert.False(applied.PendingRestart);
@@ -87,6 +98,11 @@ public class StagedApplierTests
         Assert.False(Directory.Exists(StageLayout.NewRoot(e.Client)));       // 暂存内容清掉
         Assert.True(File.Exists(StageLayout.OldPath(e.Client, "bin/a.dll"))); // 备份留着（回退窗口）
         Assert.Equal(TestSupport.Md5File(e.M2), TestSupport.Md5File(Path.Combine(e.Client, "manifest.xml")));
+
+        // 【必须】落地阶段**不写 ETag**（B-1 定案）：它只服务于"下一次清单请求能不能 304"，
+        // 而落地阶段不联网、拿不到新 ETag；写一份属于**上一版**的比不写更坏。
+        // 后果仅是落地后第一次会话多取一遍清单正文，那一次会自己补上（见 ManifestFreshnessTests）。
+        Assert.False(File.Exists(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.etag")));
     }
 
     [Fact]
@@ -96,17 +112,19 @@ public class StagedApplierTests
         var e = Prepare(tmp);
         using var _ = e.Http;
 
-        var result = new StagedApplier(Cfg(e)).Run();
+        var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
         Assert.Contains("没有待提交", result.Detail);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);
     }
 
-    // ============================================================ 拒绝落地
-
+    /// <summary>
+    /// B-1 的目标本身：**落地阶段零网络**。做法是阶段一跑完之后把 HTTP 服务器**彻底关掉**，
+    /// 再落地 —— 只要 applier 还指望着联网取清单，这条用例必红。
+    /// </summary>
     [Fact]
-    public void Apply_WhenTheRefetchedManifestMovedOn_RefusesToLand()
+    public void Apply_WithTheServerGone_LandsOffline()
     {
         using var tmp = new TempDir();
         var e = Prepare(tmp);
@@ -114,45 +132,80 @@ public class StagedApplierTests
 
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
 
-        // 删掉缓存里的远端原文 → applier 只能联网重取；而这时服务端已经发布了 v3
+        e.Http.Dispose();                                        // 服务端此刻已经不存在了
+
+        var applied = new StagedApplier(Applier(e)).Run();
+
+        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
+        Assert.Equal(0, applied.BytesDownloaded);
+        Assert.Equal(0, applied.WireBytes);
+        Assert.Equal(0, applied.PayloadBytes);
+        Assert.Equal(string.Empty, applied.HttpVersion);
+        AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);            // 树 == v2、本地清单 == m2 的原样字节
+        Assert.False(StageLayout.HasPendingPlan(e.Client));
+    }
+
+    // ============================================================ 拒绝落地
+
+    /// <summary>
+    /// B-1：applier **不联网** —— 缓存里的清单原文不在，就拒绝落地（`manifest_unavailable`），
+    /// 而不是去线上取一份"最新版"落下来。本地清单不被改写、暂存内容与计划原样留着。
+    /// </summary>
+    [Fact]
+    public void Apply_WithoutTheCachedManifest_RefusesToLand_AndDoesNotTouchAnything()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
         File.Delete(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"));
+
+        var result = new StagedApplier(Applier(e)).Run();
+
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+        Assert.Equal(UpdateReasons.ManifestUnavailable, result.Reason);
+        Assert.Contains("拒绝落地", result.Detail);
+        Assert.Equal(0, result.BytesDownloaded);
+        Assert.Equal(string.Empty, result.HttpVersion);          // 零网络：连 HTTP 版本都没有
+        Assert.Equal(0, result.WireBytes);
+        Assert.Equal(0, result.PayloadBytes);
+        AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);           // 树一个字节没动
+        Assert.True(StageLayout.HasPendingPlan(e.Client));      // 计划与暂存内容原样留着
+        Assert.False(File.Exists(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.etag")),
+            "落地阶段不写 ETag（§12.5）");
+    }
+
+    /// <summary>
+    /// `staged_plan_stale` 保留为**一致性自检**：正常流程下计划与缓存都出自阶段一，
+    /// 所以它只会在"缓存被替换 / 损坏"（或运维手工塞了一份别的清单）时触发。
+    /// </summary>
+    [Fact]
+    public void Apply_WhenTheCachedManifestNoLongerMatchesThePlan_RefusesToLand()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        // 缓存里的远端原文被换成**另一版**（模拟缓存被替换/损坏）：字节哈希与计划对不上
         var v3 = tmp.Sub("v3");
         TestSupport.WriteTree(v3,
             ("bin/a.dll", TestSupport.Big("A3")), ("bin/b.dll", TestSupport.Big("B3")),
             ("data/x.dat", TestSupport.Big("X3")));
         var m3 = Path.Combine(tmp.Path, "v3.xml");
         ManifestGenerator.Generate(v3, e.M2, [], oldRoot: e.V2Dir).Manifest.SaveToXml(m3);
-        File.Copy(m3, Path.Combine(e.Server, "manifest.xml"), overwrite: true);
+        File.Copy(m3, Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"), overwrite: true);
 
-        var result = new StagedApplier(Cfg(e)).Run();
+        var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.StagedPlanStale, result.Reason);
+        Assert.Contains("缓存", result.Detail);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);            // 一个文件都没动
         Assert.True(StageLayout.HasPendingPlan(e.Client));       // 计划与暂存内容原样留着
-    }
-
-    [Fact]
-    public void Apply_AfterRefetchingTheManifest_AlsoWritesTheEtag()
-    {
-        using var tmp = new TempDir();
-        var e = Prepare(tmp);
-        using var _ = e.Http;
-
-        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
-
-        var etagPath = Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.etag");
-        Assert.False(File.Exists(etagPath), "阶段一不写 ETag（§12.7）");
-
-        // 删掉缓存里的远端原文 → applier 只能联网重取；这条路上它拿到了 ETag，落地后应当写下来
-        File.Delete(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"));
-
-        var applied = new StagedApplier(Cfg(e)).Run();
-
-        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
-        Assert.True(File.Exists(etagPath), "重取路径拿到了 ETag，落地后应当写下来（下一轮才能 304）");
-        Assert.StartsWith("\"", File.ReadAllText(etagPath));
-        Assert.Equal(TestSupport.Md5File(e.M2), TestSupport.Md5File(Path.Combine(e.Client, "manifest.xml")));
     }
 
     [Fact]
@@ -174,7 +227,7 @@ public class StagedApplierTests
         ManifestGenerator.Generate(v3, e.M2, [], oldRoot: e.V2Dir).Manifest.SaveToXml(m3);
         File.Copy(m3, Path.Combine(e.Server, "manifest.xml"), overwrite: true);
 
-        Assert.Equal(UpdateOutcome.Updated, new StagedApplier(Cfg(e)).Run().Outcome);
+        Assert.Equal(UpdateOutcome.Updated, new StagedApplier(Applier(e)).Run().Outcome);
         AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);
     }
 
@@ -188,7 +241,7 @@ public class StagedApplierTests
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
         File.Delete(StageLayout.NewPath(e.Client, "data/x.dat"));      // 暂存内容丢了一个
 
-        var result = new StagedApplier(Cfg(e)).Run();
+        var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.StagedContentMissing, result.Reason);
@@ -223,7 +276,7 @@ public class StagedApplierTests
         File.Move(xTarget, xOld);
         Assert.False(File.Exists(xTarget));
 
-        var result = new StagedApplier(Cfg(e)).Run();
+        var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.Updated, result.Outcome);
         AssertTreeIsVersion(root, e.V2Dir, e.M2);
@@ -247,7 +300,7 @@ public class StagedApplierTests
         File.Move(xTarget, xOld);
         File.Delete(StageLayout.NewPath(root, "data/x.dat"));
 
-        var result = new StagedApplier(Cfg(e)).Run();
+        var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.StagedContentMissing, result.Reason);
@@ -269,7 +322,7 @@ public class StagedApplierTests
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
 
         var marker = Path.Combine(tmp.Path, "restarted.txt");
-        var cfg = Cfg(e) with
+        var cfg = Applier(e) with
         {
             RestartAfterApply = true,
             RestartExecutable = "cmd.exe",
@@ -296,7 +349,7 @@ public class StagedApplierTests
         using var _ = e.Http;
 
         var marker = Path.Combine(tmp.Path, "restarted-never.txt");
-        var cfg = Cfg(e) with
+        var cfg = Applier(e) with
         {
             RestartAfterApply = true,
             RestartExecutable = "cmd.exe",
@@ -378,7 +431,7 @@ public class StagedApplierTests
     }
 
     [Fact]
-    public void Apply_WhenTheRemoteManifestHasAnEscapingPath_RefusesToLand()
+    public void Apply_WhenTheCachedManifestHasAnEscapingPath_RefusesToLand()
     {
         using var tmp = new TempDir();
         var e = Prepare(tmp);
@@ -386,12 +439,11 @@ public class StagedApplierTests
 
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
 
-        // 服务端清单换成带逃逸路径的版本，并删掉缓存迫使 applier 重取。
-        // 注意：这份清单的字节哈希与计划对不上 —— 但路径信任边界要在**谈计划新不新之前**就拦下。
-        TamperPath(e, "..");
-        File.Delete(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"));
+        // 缓存里的远端原文被换成带逃逸路径的版本（被篡改/损坏的落地输入）。
+        // 注意：这份清单的字节哈希与计划也对不上 —— 但路径信任边界要在**谈计划新不新之前**就拦下。
+        TamperManifestPath(Path.Combine(TestSupport.TestCacheDir(e.Client), "manifest.remote.xml"), "..");
 
-        var result = new StagedApplier(Cfg(e)).Run();
+        var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.PathEscape, result.Reason);
@@ -409,7 +461,7 @@ public class StagedApplierTests
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
 
         // 拿本测试进程当"抢到同一个 PID 的无关进程"：PID 活着，但身份对不上 → 不许等它
-        var cfg = Cfg(e) with
+        var cfg = Applier(e) with
         {
             WaitForProcessId = Environment.ProcessId,
             WaitForProcessName = "definitely-not-this-process",
@@ -433,7 +485,7 @@ public class StagedApplierTests
 
         // 名字也相同（例如用户又双击了一次同名启动器）—— 启动时刻对不上就一定是别的进程
         using var self = System.Diagnostics.Process.GetCurrentProcess();
-        var cfg = Cfg(e) with
+        var cfg = Applier(e) with
         {
             WaitForProcessId = self.Id,
             WaitForProcessName = self.ProcessName,
@@ -458,7 +510,7 @@ public class StagedApplierTests
 
         // 三元组完全吻合 = 就是宿主本人且它没退 → 必须一直等，最后以 tree_busy 收场、一个文件都不动
         using var self = System.Diagnostics.Process.GetCurrentProcess();
-        var cfg = Cfg(e) with
+        var cfg = Applier(e) with
         {
             WaitForProcessId = self.Id,
             WaitForProcessName = self.ProcessName,
@@ -503,16 +555,21 @@ public class StagedApplierTests
         File.Copy(m1, Path.Combine(client, "manifest.xml"), overwrite: true);
 
         using var http = new TestHttpServer(server);
-        var cfg = new UpdateConfig
+        var stageOne = new UpdateConfig
         {
             RootPath = client,
             CacheDir = TestSupport.TestCacheDir(client),
             ManifestUrl = http.BaseUrl + "manifest.xml",
             ApplyMode = ApplyMode.Staged,
+        };
+        var applier = new ApplierConfig
+        {
+            RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
             ApplierPollInterval = TimeSpan.FromSeconds(1),
         };
 
-        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(cfg).Run().Outcome);
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(stageOne).Run().Outcome);
 
         // 让这棵树里真的有个进程在跑（暂存内容就是 ping 的字节，正好拿来当可执行文件）
         var exe = Path.Combine(client, "bin", "app.exe");
@@ -524,7 +581,7 @@ public class StagedApplierTests
         })!;
         try
         {
-            var blocked = new StagedApplier(cfg with { ApplierQuiescenceTimeout = TimeSpan.FromSeconds(3) }).Run();
+            var blocked = new StagedApplier(applier with { ApplierQuiescenceTimeout = TimeSpan.FromSeconds(3) }).Run();
             Assert.Equal(UpdateOutcome.Failed, blocked.Outcome);
             Assert.Equal(UpdateReasons.TreeBusy, blocked.Reason);
             Assert.True(StageLayout.HasPendingPlan(client));
@@ -536,7 +593,7 @@ public class StagedApplierTests
         }
 
         // 障碍消失后，同一次落地就能完成
-        var landed = new StagedApplier(cfg with { ApplierQuiescenceTimeout = TimeSpan.FromSeconds(20) }).Run();
+        var landed = new StagedApplier(applier with { ApplierQuiescenceTimeout = TimeSpan.FromSeconds(20) }).Run();
         Assert.Equal(UpdateOutcome.Updated, landed.Outcome);
         Assert.False(StageLayout.HasPendingPlan(client));
         Assert.Equal(TestSupport.Md5(TestSupport.Big("D2")),
@@ -545,7 +602,10 @@ public class StagedApplierTests
 
     // ============================================================ CLI 契约
 
-    /// <summary>宿主只需要 `Client.CLI --apply`：落地成功退出码 0、stdout 一行 JSON 的 Outcome=Updated。</summary>
+    /// <summary>
+    /// 宿主只需要 `Client.CLI --apply`：落地成功退出码 0、stdout 一行 JSON 的 Outcome=Updated。
+    /// 命令行里**没有 `--manifest-url`** —— 落地阶段不再有"去哪儿取清单"这件事（B-1）。
+    /// </summary>
     [Fact]
     public void Shell_WithApplyMode_LandsTheStagedTree_AndExitsZero()
     {
@@ -562,7 +622,6 @@ public class StagedApplierTests
         foreach (var a in new[]
                  {
                      ShellDll(), "--apply", "--root", e.Client,
-                     "--manifest-url", e.Http.BaseUrl + "manifest.xml",
                      "--cache-dir", TestSupport.TestCacheDir(e.Client), "--json",
                  })
             psi.ArgumentList.Add(a);
@@ -575,7 +634,151 @@ public class StagedApplierTests
         Assert.True(p.ExitCode == 0, $"落地成功应当以退出码 0 结束（实得 {p.ExitCode}）；stderr={stderr}");
         using var doc = JsonDocument.Parse(stdout);
         Assert.Equal("Updated", doc.RootElement.GetProperty("Outcome").GetString());
+
+        // 零网络：三个字节口径与 HTTP 版本都必须是空的/0，且日志的列数/列含义不变（§4.11 契约）
+        Assert.Equal(0, doc.RootElement.GetProperty("PayloadBytes").GetInt64());
+        Assert.Equal(0, doc.RootElement.GetProperty("WireBytes").GetInt64());
+        Assert.Equal(0, doc.RootElement.GetProperty("WireSentBytes").GetInt64());
+        Assert.Equal(0, doc.RootElement.GetProperty("WireReceivedBytes").GetInt64());
+        Assert.Equal(string.Empty, doc.RootElement.GetProperty("HttpVersion").GetString());
+        AssertRunLineHasContractColumns(e.Client);
         AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);
+    }
+
+    /// <summary>
+    /// B-1 的"最彻底"那一半：阶段一的参数在 `--apply` 下**报错**，而不是被静默忽略。
+    /// 静默忽略会让"落地还要去取远端"这个误解一直活着。
+    /// </summary>
+    [Fact]
+    public void Shell_WithApplyMode_RejectsStageOneArguments()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+
+        var psi = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
+        };
+        foreach (var a in new[]
+                 {
+                     ShellDll(), "--apply", "--root", e.Client,
+                     "--cache-dir", TestSupport.TestCacheDir(e.Client),
+                     "--manifest-url", e.Http.BaseUrl + "manifest.xml",
+                 })
+            psi.ArgumentList.Add(a);
+
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEnd();
+        var stderr = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+
+        Assert.Equal(2, p.ExitCode);                                  // 参数错误
+        Assert.Contains("--manifest-url", stderr);
+        Assert.Contains("阶段一", stderr);
+        Assert.DoesNotContain("Outcome", stdout);                     // 没跑落地，没吐结果 JSON
+        Assert.Contains("用法", stdout);                              // 而是打了一遍用法
+        AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);                 // 树一个字节没动
+    }
+
+    /// <summary>`BuildApplyCommand` 生成的 argv：没有 URL / 工具目录，且把 applier 真正需要的都带上了。</summary>
+    [Fact]
+    public void BuildApplyCommand_HasNoWayToExpressARemoteManifest()
+    {
+        var cfg = new ApplierConfig
+        {
+            RootPath = Path.GetTempPath(),
+            CacheDir = Path.Combine(Path.GetTempPath(), "cache-x"),
+            WaitForProcessId = 4242,
+            WaitForProcessName = "host",
+            WaitForProcessStartTicks = 123456789,
+            ApplierQuiescenceTimeout = TimeSpan.FromSeconds(90),
+            ApplierPollInterval = TimeSpan.FromSeconds(3),
+        };
+
+        var psi = StagedApplier.BuildApplyCommand("applier.exe", cfg);
+        var argv = psi.ArgumentList.ToList();
+
+        Assert.DoesNotContain("--manifest-url", argv);
+        Assert.DoesNotContain("--tools-dir", argv);
+        Assert.DoesNotContain("--concurrency", argv);
+        Assert.DoesNotContain("--fallback", argv);
+        Assert.DoesNotContain("--base-url", argv);
+        Assert.Equal("--apply", argv[0]);
+        Assert.Contains("--root", argv);
+        Assert.Contains("--cache-dir", argv);
+        Assert.Contains("--wait-for-pid", argv);
+        // 身份三件套由 BuildApplyCommand 在**宿主进程里**自动填 —— 装的必须是"当前这个进程"，不是上面那个 4242
+        Assert.Equal(Environment.ProcessId.ToString(), argv[argv.IndexOf("--wait-for-pid") + 1]);
+        Assert.Equal("90", argv[argv.IndexOf("--quiescence-timeout") + 1]);
+        Assert.Equal("3", argv[argv.IndexOf("--poll-seconds") + 1]);
+        // 没有显式给 --manifest-file 时不带它：两边用**同一个默认值**（<cache-dir>/manifest.remote.xml）
+        Assert.DoesNotContain("--manifest-file", argv);
+    }
+
+    /// <summary>阶段一与落地阶段对"缓存在哪"必须算出**逐字相同**的结果（锁与清单都在那里）。</summary>
+    [Fact]
+    public void ApplierAndStageOne_AgreeOnTheResolvedPaths()
+    {
+        using var tmp = new TempDir();
+        var root = tmp.Sub("install");
+        var stageOne = new UpdateConfig { RootPath = root, ManifestUrl = "http://example.invalid/manifest.xml" };
+        var applier = new ApplierConfig { RootPath = root };
+
+        Assert.Equal(stageOne.ResolveCacheDir(), applier.ResolveCacheDir());
+        Assert.Equal(stageOne.ResolveLogPath(), applier.ResolveLogPath());
+        Assert.Equal(stageOne.ResolveLocalManifestPath(), applier.ResolveLocalManifestPath());
+        Assert.Equal(Path.Combine(applier.ResolveCacheDir(), "manifest.remote.xml"), applier.ResolveManifestFile());
+    }
+
+    /// <summary>R 行的列数与列含义是契约（§4.11）：落地阶段**照旧写满**，只是 requests/payload/wire 恒为 0。</summary>
+    private static void AssertRunLineHasContractColumns(string client)
+    {
+        var log = File.ReadAllLines(Path.Combine(client, "UpdaterCache", "update.log"));
+        var run = log.Last(l => l.StartsWith("R\t", StringComparison.Ordinal));
+        var cols = run.Split('\t');
+        // R | run_id | manifest_hash | total | skip | move | patch | full | fail | bytes | ms | result | requests | payload | wire
+        Assert.Equal(15, cols.Length);
+        Assert.Equal("R", cols[0]);
+        Assert.Equal("Updated", cols[11]);          // result
+        Assert.Equal("0", cols[12]);                // requests
+        Assert.Equal("0", cols[13]);                // payload
+        Assert.Equal("0", cols[14]);                // wire
+    }
+
+    /// <summary>
+    /// applier 把**实际使用**的 root / cacheDir / manifestFile 打在日志最前面（`C` 行型）。
+    /// 两个配置类型各自独立，唯一会出事的是"两边指向的不是同一处"，所以这一行是排查的第一入口。
+    /// </summary>
+    [Fact]
+    public void Apply_LogsThePathsItActuallyUsed()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+
+        Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
+        Assert.Equal(UpdateOutcome.Updated, new StagedApplier(Applier(e)).Run().Outcome);
+
+        var lines = File.ReadAllLines(Path.Combine(TestSupport.TestCacheDir(e.Client), "update.log"));
+        var ctx = lines.Where(l => l.StartsWith("C\t", StringComparison.Ordinal)).ToList();
+
+        Assert.Equal(3, ctx.Count);
+        Assert.Equal("root", ctx[0].Split('\t')[2]);
+        Assert.Equal(Path.GetFullPath(e.Client), ctx[0].Split('\t')[3]);
+        Assert.Equal("cacheDir", ctx[1].Split('\t')[2]);
+        Assert.Equal(Path.GetFullPath(TestSupport.TestCacheDir(e.Client)), ctx[1].Split('\t')[3]);
+        Assert.Equal("manifestFile", ctx[2].Split('\t')[2]);
+        Assert.Equal(Path.Combine(Path.GetFullPath(TestSupport.TestCacheDir(e.Client)), "manifest.remote.xml"),
+            ctx[2].Split('\t')[3]);
+        // 三个 `C` 行必须紧挨在**本次（applier）**的 S 行之前（同一个日志里前面还有阶段一那一轮的 S/F/R）
+        var sIndex = Array.FindLastIndex(lines, l => l.StartsWith("S\t", StringComparison.Ordinal));
+        Assert.True(sIndex >= 3, "C 行必须排在本次运行的 S 行之前");
+        Assert.Contains("-apply", lines[sIndex].Split('\t')[1]);       // run_id 里带 -apply，确认这是 applier 那一轮
+        Assert.All(new[] { sIndex - 3, sIndex - 2, sIndex - 1 },
+            i => Assert.StartsWith("C\t", lines[i]));
     }
 
     private static string ShellDll()

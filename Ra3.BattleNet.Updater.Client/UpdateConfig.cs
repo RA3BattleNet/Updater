@@ -1,63 +1,16 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace Ra3.BattleNet.Updater.Client;
 
 /// <summary>
-/// 更新会话配置。产品差异**只能**通过这里表达（AGENT.md §6.3）。
+/// **阶段一（更新会话）的配置**。产品差异**只能**通过这里表达（AGENT.md §6.3）。
+///
+/// 【必须】落地阶段（applier）用的是**另一个**类型 <see cref="ApplierConfig"/>：
+/// 它不联网、也不该能表达"去哪儿取远端"，所以这里的 applier 专用项（等宿主、拉起宿主、
+/// 静默时限…）**已经全部搬走**，两者不共享、不派生。改错地方会立刻是编译错误，而不是静默失效。
 /// </summary>
 public sealed record UpdateConfig
 {
     /// <summary>安装根目录。</summary>
     public required string RootPath { get; init; }
-
-    /// <summary>
-    /// applier 要等的宿主进程号（null = 不等待特定进程）。由 CLI 的 --wait-for-pid 设置；
-    /// 与"树内进程名扫描"一起构成静默判据（AGENT.md §12.5）。
-    /// </summary>
-    public int? WaitForProcessId { get; init; }
-
-    /// <summary>
-    /// 宿主进程名（不含 .exe）。与 <see cref="WaitForProcessId"/> 一起校验：
-    /// **PID 会被系统复用**，光看 PID 会把"抢到同一个 PID 的无关进程"当成宿主还在，白等到超时。
-    /// 由 <c>StagedApplier.BuildApplyCommand</c> 自动填 —— 宿主不用管。
-    /// </summary>
-    public string? WaitForProcessName { get; init; }
-
-    /// <summary>
-    /// 宿主进程的启动时刻（<c>Process.StartTime.Ticks</c>）。它才是**唯一**的实例标识：
-    /// 同 PID + 同名字仍可能是"用户又启动了一次同名程序"（例如又双击了一次启动器），
-    /// 启动时刻对不上就一定不是同一个进程。同样由 BuildApplyCommand 自动填。
-    /// </summary>
-    public long? WaitForProcessStartTicks { get; init; }
-
-    /// <summary>
-    /// 落地**成功之后**把宿主拉起来（§12.5）。默认关 —— 这是行为改变，必须由宿主显式开。
-    /// 用 <c>StagedApplier.BuildApplyCommand</c> 时，只要把这个开关打开，
-    /// 宿主自己的可执行文件与**原始参数原文**会被自动填好，宿主侧不需要别的代码。
-    /// </summary>
-    public bool RestartAfterApply { get; init; }
-
-    /// <summary>要拉起的可执行文件；<c>BuildApplyCommand</c> 会自动填成当前进程（即宿主自己）。</summary>
-    public string? RestartExecutable { get; init; }
-
-    /// <summary>
-    /// 原样传给宿主的参数 —— 是宿主**原始命令行里去掉 exe 那一段的原文**，所以引号不会被我们重新解释
-    /// （自己拼引号是这类功能最常见的翻车点）。
-    /// </summary>
-    public string? RestartArguments { get; init; }
-
-    /// <summary>宿主的工作目录；不给就沿用 applier 的当前目录。</summary>
-    public string? RestartWorkingDirectory { get; init; }
-
-    /// <summary>拉起前的等待，默认 1 秒（给系统收尾和文件句柄释放留一点余量）。</summary>
-    public TimeSpan RestartDelay { get; init; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>applier 等待"树静默"的总时限（§12.5）：超时即整轮不落地，什么都不动。</summary>
-    public TimeSpan ApplierQuiescenceTimeout { get; init; } = TimeSpan.FromMinutes(10);
-
-    /// <summary>applier 的静默轮询间隔。默认 2 秒（实测：按名字扫描约 4.5ms/次）。</summary>
-    public TimeSpan ApplierPollInterval { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// 落地模式（AGENT.md §12.1）。默认 <see cref="ApplyMode.InPlace"/>：
@@ -175,50 +128,16 @@ public sealed record UpdateConfig
 
     public string ResolveLocalManifestPath() => LocalManifestPath ?? Path.Combine(RootPath, "manifest.xml");
 
-    public string ResolveCacheDir() =>
-        CacheDir ?? Path.Combine(Path.GetTempPath(), "updater-cache", InstallFingerprint());
-
-    public string ResolveLogPath() =>
-        LogPath
-        ?? (CacheDir is null
-            ? Path.Combine(LogRoot(), "updater-logs", InstallFingerprint(), "update.log")
-            : Path.Combine(ResolveCacheDir(), "update.log"));
-
     /// <summary>
-    /// 安装根指纹：同一台机器上不同安装目录必须各有各的缓存与日志。
-    /// 理由：单实例锁（§4.9）与续传状态都按安装根隔离；两个安装共用一份缓存会让它们互相判成「已有实例在运行」。
-    /// 形式 = 根目录名（最多 24 字符，便于人工在临时目录里认出来）+ 根路径哈希前 16 位。
-    /// Windows 路径大小写不敏感，因此先归一化再取哈希：同一目录传 "C:\App" 与 "c:\app" 必须得到同一个指纹，
-    /// 否则会拿到两份缓存，而锁是按缓存目录定位的 —— 那会让「同一安装根只允许一个会话」失效。
+    /// 缓存目录。默认 <c>&lt;系统临时目录&gt;/updater-cache/&lt;安装根指纹&gt;</c>（§12.3）。
+    /// 落地阶段（<see cref="ApplierConfig.ResolveCacheDir"/>）必须求出**同一个**结果 ——
+    /// 锁与阶段一留下的远端清单都在那里；实现只有一份（<see cref="InstallPaths"/>）。
     /// </summary>
-    private string InstallFingerprint()
-    {
-        var full = Path.GetFullPath(RootPath);
-        var key = OperatingSystem.IsWindows() ? full.ToUpperInvariant() : full;
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
-        var leaf = SafeName(Path.GetFileName(
-            key.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
-        return leaf.Length == 0 ? hash : leaf + "-" + hash;
-    }
+    public string ResolveCacheDir() => InstallPaths.CacheDir(CacheDir, RootPath);
 
-    private static string SafeName(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return string.Empty;
-        var invalid = Path.GetInvalidFileNameChars();
-        var sb = new StringBuilder(name.Length);
-        foreach (var ch in name) sb.Append(Array.IndexOf(invalid, ch) >= 0 ? '_' : ch);
-        var cleaned = sb.ToString().Trim().TrimEnd('.');
-        return cleaned.Length > 24 ? cleaned[..24] : cleaned;
-    }
+    /// <summary>日志路径；默认规则见 AGENT.md §4.8（与落地阶段共用 <see cref="InstallPaths"/>）。</summary>
+    public string ResolveLogPath() => InstallPaths.LogPath(LogPath, CacheDir, RootPath);
 
-    /// <summary>日志根目录：LocalApplicationData（Linux 上映射到 ~/.local/share）；拿不到就退到主目录。</summary>
-    private static string LogRoot()
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (!string.IsNullOrEmpty(local)) return local;
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return string.IsNullOrEmpty(home) ? Path.GetTempPath() : home;
-    }
 
     public string ResolveToolsDir() => ToolsDir ?? Path.Combine(AppContext.BaseDirectory, "tools");
 

@@ -64,6 +64,13 @@ public class StagedUpdateTests
         ApplyMode = mode,
     };
 
+    /// <summary>落地阶段（阶段二/三）的配置：**另一个类型**，没有清单地址（§12.5 零网络）。</summary>
+    private static ApplierConfig Applier(Env e) => new()
+    {
+        RootPath = e.Client,
+        CacheDir = TestSupport.TestCacheDir(e.Client),
+    };
+
     [Fact]
     public void StagedRun_LeavesTheTreeUntouched_AndStagesEveryChangeToLand()
     {
@@ -128,7 +135,7 @@ public class StagedUpdateTests
         using var _ = e.Http;
 
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
-        Assert.Equal(UpdateOutcome.Updated, new StagedApplier(Cfg(e)).Run().Outcome);
+        Assert.Equal(UpdateOutcome.Updated, new StagedApplier(Applier(e)).Run().Outcome);
         Assert.True(Directory.Exists(StageLayout.OldRoot(e.Client)), "落地后应当留着备份（回退窗口）");
         Assert.True(File.Exists(StageLayout.OldPath(e.Client, "bin/a.dll")));
 
