@@ -294,9 +294,13 @@ public sealed class Updater
             log.File(string.Empty, null, localManifestPath, remoteHash, null, "full", LogStatus.NeedsFullPackage,
                 UpdateReasons.LocalCorrupt, 0, 0);
 
-        // 本地清单缺失/损坏时，计划里每个文件都会是「完整下载」—— 那等于把整个产品重下。
-        // 正确做法是**退化为按磁盘哈希校验**：命中就跳过。花 CPU，不花带宽（AGENT.md §4.10）。
-        // 这个判断现在对所有"本次要动"的文件都生效（见下面的 LooksAlreadyUpdated）。
+        // 没有可信基线时，计划里每个文件都会是「完整下载」—— 那等于把整个产品重下。
+        // 层一（在规划之前）：`AdoptLocalTreeAsync` 已经按磁盘哈希把命中的文件变成 `Skip`，
+        //   所以到这里的条目本来就少了（AGENT.md §4.10）。
+        // 层二（就在下面）：对**本次要动**的条目再问一次"落地点上是否已经是目标内容" —— 那是 `AlreadyPlaced`，
+        //   它同时承担"上次跑到一半"的续做语义（§4.3 步骤① / §12.5）。
+        //   注意别把它和 `LooksAlreadyUpdated` 搞混：后者**只**在 `VerifyUnchangedFiles` 打开时对已经判 `Skip`
+        //   的条目复核磁盘，不参与"要不要做这个文件"的决策。
         var work = plan.Entries.ToList();
         var pending = new List<PlanEntry>();
 

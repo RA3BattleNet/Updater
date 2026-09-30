@@ -85,6 +85,28 @@ public class BaselineAdoptionTests
     }
 
     /// <summary>
+    /// 触发条件的**另一半**：本地清单存在但坏了（解析失败 ⇒ 同样没有可信基线）。
+    /// 树逐字节等于远端时，必须被治成 `UpToDate` 并把坏清单换成远端原文 ——
+    /// 而不是"本地不可信，那就全量重下"。
+    /// </summary>
+    [Fact]
+    public void CorruptLocalManifest_WithTheTreeAlreadyMatching_IsHealedToUpToDate()
+    {
+        using var tmp = new TempDir();
+        var e = Prepare(tmp);
+        using var _ = e.Http;
+        TestSupport.CopyTree(e.V2Dir, e.Client);
+        File.WriteAllText(Path.Combine(e.Client, "manifest.xml"), "<Metadata><broken", new UTF8Encoding(false));
+
+        var result = new ClientUpdater(Cfg(e)).Run();
+
+        Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
+        Assert.Equal(0, result.BytesDownloaded);
+        Assert.Equal(result.Total, result.Skipped);
+        AssertLocalManifestIsRemoteVerbatim(e);       // 坏清单被**远端原文**替换（不是我们自己拼一份）
+    }
+
+    /// <summary>
     /// 暂存模式下的全部命中**必须直接收尾**：若让它走完流程，会写出一个**空计划**并返回 `Staged`，
     /// 宿主于是提示"需要重启" —— 用户白重启一次而什么都没发生。
     /// </summary>

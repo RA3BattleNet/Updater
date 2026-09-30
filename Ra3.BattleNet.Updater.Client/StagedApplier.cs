@@ -120,7 +120,8 @@ public sealed class StagedApplier
         var knownHash = remoteHash.Length > 0 ? remoteHash : plan.ManifestHash;
         if (remoteBytes is null)
             return Finish(log, sw, knownHash, UpdateOutcome.Failed, UpdateReasons.ManifestUnavailable,
-                $"取不到远端清单（{_cfg.ResolveManifestFile()} 不在）：拒绝落地（本地清单不会被改写，暂存内容原样保留）",
+                $"取不到远端清单（{_cfg.ResolveManifestFile()} 不在）：拒绝落地（本地清单不会被改写，暂存内容与计划原样保留）" +
+                "；下一次更新会话会把它补齐，届时 applier 可以继续落地",
                 plan.Actions.Count, 0, 0, 0);
 
         var remote = RemoteModel(remoteBytes);
