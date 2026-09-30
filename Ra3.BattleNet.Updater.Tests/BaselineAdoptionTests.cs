@@ -149,6 +149,11 @@ public class BaselineAdoptionTests
 
         // 核对期间用既有的 check 阶段上报（不新增枚举）：宿主能显示"正在核对本地文件 N/M"
         Assert.Contains(stages, p => p.Stage == UpdateStage.Check && p.Total == 4);
+
+        // 【事实】逐文件进度：Stage 只放阶段标识，动作名走 Action；收尾报一次 done（AGENT.md §4.7）
+        Assert.Contains(stages, p => p.Stage == UpdateStage.Download && p.Action == "full");
+        Assert.Equal(UpdateStage.Done, stages[^1].Stage);
+        Assert.DoesNotContain(stages, p => p.Stage is "full" or "patch" or "move" or "skip");
     }
 
     /// <summary>完全不一致（空树）→ 与今天一致：全量，一个 skip 都不该凭空出现。</summary>

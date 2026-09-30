@@ -25,6 +25,9 @@ public sealed class StagedApplier
 {
     private readonly ApplierConfig _cfg;
 
+    /// <summary>本轮进度回调。收尾要报一次 <see cref="UpdateStage.Done"/>，而收尾点分散在多个 return 上。</summary>
+    private IProgress<UpdateProgress>? _progress;
+
     public StagedApplier(ApplierConfig cfg) => _cfg = cfg;
 
     public UpdateResult Run(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
@@ -33,6 +36,7 @@ public sealed class StagedApplier
     public async Task<UpdateResult> RunAsync(IProgress<UpdateProgress>? progress = null,
         CancellationToken ct = default)
     {
+        _progress = progress;   // 收尾时要报一次 Done；一个实例只跑一轮（见类注释）
         var cacheDir = Path.GetFullPath(_cfg.ResolveCacheDir());
         Fs.CreateDirectory(cacheDir);
         Fs.CreateDirectory(StageLayout.Root(_cfg.RootPath));
@@ -108,7 +112,7 @@ public sealed class StagedApplier
         var plan = StageLayout.LoadPlan(root);
         if (plan is null)
             return Finish(log, sw, string.Empty, UpdateOutcome.UpToDate, UpdateReasons.None,
-                $"没有待提交的暂存更新（{StageLayout.DirName}/{StageLayout.PlanFileName} 不存在）",
+                $"没有可用的待提交计划（{StageLayout.DirName}/{StageLayout.PlanFileName} 不存在或读不动）：本轮不落地",
                 0, 0, 0, 0);
 
         // 【必须】输入的**唯一来源**是阶段一留在缓存里的那份远端清单原文（零网络）。
@@ -187,6 +191,10 @@ public sealed class StagedApplier
                 continue;
             }
 
+            // 【事实】在**动手之前**就报：宿主据此显示"正在写 xxx"。
+            // （历史实现只在成功之后报，且 Skip 与失败当次都不报 —— 事实是缺的。）
+            progress?.Report(new UpdateProgress(done, total, action.RelativePath, UpdateStage.Apply));
+
             try
             {
                 if (action.Kind == StagedActionKind.Move) CommitMove(root, action);
@@ -204,7 +212,7 @@ public sealed class StagedApplier
                 break;
             }
 
-            progress?.Report(new UpdateProgress(++done, total, action.RelativePath, UpdateStage.Apply));
+            done++;
         }
 
         if (failed > 0)
@@ -244,16 +252,21 @@ public sealed class StagedApplier
             .ToList();
 
         var self = Environment.ProcessId;
-        var deadline = DateTime.UtcNow + _cfg.ApplierQuiescenceTimeout;
+        var started = DateTime.UtcNow;
+        var timeout = _cfg.ApplierQuiescenceTimeout;
 
         while (true)
         {
             ct.ThrowIfCancellationRequested();
 
             if (HostExited() && !AnyProcessRunningFrom(root, exeNames, self)) return true;
-            if (DateTime.UtcNow >= deadline) return false;
+            var elapsed = DateTime.UtcNow - started;
+            if (elapsed >= timeout) return false;
 
-            progress?.Report(new UpdateProgress(0, 0, string.Empty, UpdateStage.Check));
+            // 【事实】等静默可能很长（时限默认 10 分钟），所以它是一个**可分辨的阶段**，
+            // 并且带上"已等多久 / 时限"——宿主据此自己显示"正在等待其他程序退出… 已 12s / 600s"。
+            progress?.Report(new UpdateProgress(0, 0, string.Empty, UpdateStage.Wait,
+                string.Empty, elapsed, timeout));
             await Task.Delay(_cfg.ApplierPollInterval, ct).ConfigureAwait(false);
         }
     }
@@ -433,9 +446,23 @@ public sealed class StagedApplier
         log.Run(manifestHash, total, skipped, moved, 0, 0, failed, 0, (long)sw.Elapsed.TotalMilliseconds,
             outcome.ToString(), 0, 0, 0);
 
+        // 【必须】把**结论**也写进日志（用已有的 C 行型，不动任何既有列）。
+        // 会话级失败（tree_busy / manifest_unavailable / path_escape / staged_plan_stale /
+        // staged_content_missing）以前**在日志里一个字都没有** —— 宿主自己 exe 当 applier 时它能把
+        // Reason/Detail 弹给用户，但排查时用户只会把日志发过来，那条路不能是断的。
+        log.Context("result", outcome.ToString());
+        if (reason.Length > 0) log.Context("reason", OneLine(reason));
+        if (detail.Length > 0) log.Context("detail", OneLine(detail));
+
+        _progress?.Report(new UpdateProgress(total, total, string.Empty, UpdateStage.Done));
+
         return new UpdateResult(outcome, reason, total, skipped, moved, 0, 0, failed, 0, sw.Elapsed, detail,
             string.Empty, 0, 0, 0, 0);
     }
+
+    /// <summary>日志是 TAB 分列的一行一记录：值里出现 TAB/换行会把列数搞乱，统一压成空格。</summary>
+    private static string OneLine(string s) =>
+        s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
 
     /// <summary>
     /// 生成"宿主退出后由谁来落地"的命令（§12.5）。**库不自己 spawn**（§4.12：不改变进程生命周期），

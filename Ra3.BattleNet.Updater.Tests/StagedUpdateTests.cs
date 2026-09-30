@@ -348,6 +348,40 @@ public class StagedUpdateTests
         Assert.Equal(TestSupport.Md5File(localManifest), TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
     }
 
+    /// <summary>
+    /// 计划是**原子替换**写的（tmp + 改名，与写本地清单同款）。
+    /// 直接写目标文件的话，写到一半被杀会留下**截断的 JSON**：它"存在"（`HasPendingPlan` 为真 →
+    /// 就地模式会被拒）却读不动（applier 只会说"没有可用的待提交计划"），用户白重启一次。
+    /// </summary>
+    [Fact]
+    public void SavePlan_IsAtomic_AndRoundTrips()
+    {
+        using var tmp = new TempDir();
+        var root = tmp.Sub("install");
+        var plan = new StagedPlan("0123456789abcdef0123456789abcdef",
+        [
+            new StagedAction("bin/a.dll", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", StagedActionKind.Place),
+            new StagedAction("data/b.dat", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                StagedActionKind.Move, "old/b.dat"),
+        ]);
+
+        StageLayout.SavePlan(root, plan);
+
+        // 没有留下任何临时文件
+        Assert.Empty(Directory.GetFiles(StageLayout.Root(root), "*.tmp", SearchOption.AllDirectories));
+        // 内容能原样读回来（含 Move 的来源与种类）
+        var loaded = StageLayout.LoadPlan(root);
+        Assert.NotNull(loaded);
+        Assert.Equal(plan.ManifestHash, loaded!.ManifestHash);
+        Assert.Equal(2, loaded.Actions.Count);
+        Assert.Equal(StagedActionKind.Move, loaded.Actions[1].Kind);
+        Assert.Equal("old/b.dat", loaded.Actions[1].MoveFromRelative);
+        // 覆盖写第二次也照样干净（改名是原子的）
+        StageLayout.SavePlan(root, plan with { ManifestHash = "ffffffffffffffffffffffffffffffff" });
+        Assert.Equal("ffffffffffffffffffffffffffffffff", StageLayout.LoadPlan(root)!.ManifestHash);
+        Assert.Empty(Directory.GetFiles(StageLayout.Root(root), "*.tmp", SearchOption.AllDirectories));
+    }
+
     /// <summary>暂存区里这些文件的哈希必须分别等于目标 manifest 里的哈希。</summary>
     private static void AssertStagedMatchesManifest(string client, string manifestPath, params string[] rels)
     {

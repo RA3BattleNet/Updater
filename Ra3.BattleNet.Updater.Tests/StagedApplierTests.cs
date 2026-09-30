@@ -87,7 +87,19 @@ public class StagedApplierTests
         Assert.Equal(UpdateOutcome.Staged, new ClientUpdater(Cfg(e)).Run().Outcome);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);                        // 阶段一没动树
 
-        var applied = new StagedApplier(Applier(e)).Run();
+        var stages = new List<UpdateProgress>();
+        var applied = new StagedApplier(Applier(e)).Run(new SyncProgress<UpdateProgress>(stages.Add));
+
+        Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
+        Assert.False(applied.PendingRestart);
+        Assert.Equal(0, applied.BytesDownloaded);                            // 落地不下任何东西
+        AssertTreeIsVersion(e.Client, e.V2Dir, e.M2);                        // 树 == 目标版本、清单 == m2 原样字节
+
+        // 【事实】进度：每个动作**动手之前**先报一次（宿主据此显示"正在写 xxx"），收尾报一次 done。
+        Assert.Contains(stages, p => p.Stage == UpdateStage.Apply && p.FileName.Length > 0);
+        Assert.Equal(UpdateStage.Done, stages[^1].Stage);
+        Assert.Equal(stages[^1].Total, stages[^1].Current);                  // done 收尾时计数是满的
+        Assert.DoesNotContain(stages, p => p.Stage is "place" or "move" or "patch" or "full");   // 动作名不再混进 Stage
 
         Assert.Equal(UpdateOutcome.Updated, applied.Outcome);
         Assert.False(applied.PendingRestart);
@@ -115,7 +127,8 @@ public class StagedApplierTests
         var result = new StagedApplier(Applier(e)).Run();
 
         Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
-        Assert.Contains("没有待提交", result.Detail);
+        // 措辞改准：文件可能只是"读不动"，而不是不存在（别对用户说假话）
+        Assert.Contains("没有可用的待提交计划", result.Detail);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);
     }
 
@@ -519,12 +532,29 @@ public class StagedApplierTests
             ApplierPollInterval = TimeSpan.FromMilliseconds(200),
         };
 
-        var result = new StagedApplier(cfg).Run();
+        var stages = new List<UpdateProgress>();
+        var result = new StagedApplier(cfg).Run(new SyncProgress<UpdateProgress>(stages.Add));
 
         Assert.Equal(UpdateOutcome.Failed, result.Outcome);
         Assert.Equal(UpdateReasons.TreeBusy, result.Reason);
         AssertTreeIsVersion(e.Client, e.V1Dir, e.M1);
         Assert.True(StageLayout.HasPendingPlan(e.Client));       // 计划原样留着，下次再来
+
+        // 【事实】等静默期间是可分辨的阶段，且带"已等多久 / 时限"（宿主据此自己显示等待计数）
+        Assert.Contains(stages, p => p.Stage == UpdateStage.Wait
+                                     && p.WaitElapsed is not null
+                                     && p.WaitTimeout == TimeSpan.FromSeconds(3));
+        Assert.Equal(UpdateStage.Done, stages[^1].Stage);
+
+        // 【必须】会话级失败的原因必须进日志 —— 排查时用户只会把日志发过来。
+        // 以前 Finish 只写 R 行的 outcome，reason/detail 只进返回值 → tree_busy 在日志里一个字都没有。
+        var log = File.ReadAllLines(Path.Combine(TestSupport.TestCacheDir(e.Client), "update.log"));
+        var ctx = log.Where(l => l.StartsWith("C\t", StringComparison.Ordinal)).Select(l => l.Split('\t')).ToList();
+        Assert.Contains(ctx, c => c[2] == "result" && c[3] == nameof(UpdateOutcome.Failed));
+        Assert.Contains(ctx, c => c[2] == "reason" && c[3] == UpdateReasons.TreeBusy);
+        Assert.Contains(ctx, c => c[2] == "detail" && c[3].Contains("仍有进程在使用这棵树"));
+        // R 行的列数/列含义不变（§4.11 契约）
+        AssertRunLineHasContractColumns(e.Client, "Failed");
     }
 
     [Fact]
@@ -734,7 +764,7 @@ public class StagedApplierTests
     }
 
     /// <summary>R 行的列数与列含义是契约（§4.11）：落地阶段**照旧写满**，只是 requests/payload/wire 恒为 0。</summary>
-    private static void AssertRunLineHasContractColumns(string client)
+    private static void AssertRunLineHasContractColumns(string client, string outcome = "Updated")
     {
         var log = File.ReadAllLines(Path.Combine(client, "UpdaterCache", "update.log"));
         var run = log.Last(l => l.StartsWith("R\t", StringComparison.Ordinal));
@@ -742,7 +772,7 @@ public class StagedApplierTests
         // R | run_id | manifest_hash | total | skip | move | patch | full | fail | bytes | ms | result | requests | payload | wire
         Assert.Equal(15, cols.Length);
         Assert.Equal("R", cols[0]);
-        Assert.Equal("Updated", cols[11]);          // result
+        Assert.Equal(outcome, cols[11]);            // result
         Assert.Equal("0", cols[12]);                // requests
         Assert.Equal("0", cols[13]);                // payload
         Assert.Equal("0", cols[14]);                // wire
@@ -765,7 +795,8 @@ public class StagedApplierTests
         var lines = File.ReadAllLines(Path.Combine(TestSupport.TestCacheDir(e.Client), "update.log"));
         var ctx = lines.Where(l => l.StartsWith("C\t", StringComparison.Ordinal)).ToList();
 
-        Assert.Equal(3, ctx.Count);
+        // 头三行（在 S 行之前）：这一轮实际用的是哪三个路径 —— 两个配置类型各自独立，最值得核对的就是它们
+        Assert.True(ctx.Count >= 3);
         Assert.Equal("root", ctx[0].Split('\t')[2]);
         Assert.Equal(Path.GetFullPath(e.Client), ctx[0].Split('\t')[3]);
         Assert.Equal("cacheDir", ctx[1].Split('\t')[2]);
@@ -779,6 +810,10 @@ public class StagedApplierTests
         Assert.Contains("-apply", lines[sIndex].Split('\t')[1]);       // run_id 里带 -apply，确认这是 applier 那一轮
         Assert.All(new[] { sIndex - 3, sIndex - 2, sIndex - 1 },
             i => Assert.StartsWith("C\t", lines[i]));
+        // 结论（result/reason/detail）也进日志，且排在 R 行**之后**
+        var rIndex = Array.FindLastIndex(lines, l => l.StartsWith("R\t", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Split('\t') is ["C", _, "result", "Updated"]);
+        Assert.True(Array.FindIndex(lines, l => l.Split('\t') is ["C", _, "result", _]) > rIndex);
     }
 
     private static string ShellDll()

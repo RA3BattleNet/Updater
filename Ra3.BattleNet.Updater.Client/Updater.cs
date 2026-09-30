@@ -40,6 +40,9 @@ public sealed class Updater
 
 
 
+    /// <summary>会话内部的进度回调（收尾报 <see cref="UpdateStage.Done"/> 用）。</summary>
+    private IProgress<UpdateProgress>? _progress;
+
     public Updater(UpdateConfig cfg) => _cfg = cfg;
 
     public UpdateResult Run(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
@@ -75,6 +78,8 @@ public sealed class Updater
 
     private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken externalCt)
     {
+        _progress = progress;   // 收尾要报一次 Done，而收尾点分散在多个 return 上（一个实例只跑一个会话）
+
         // 整体时限（§4.6）：管住"每个请求都没超时、但整轮永远跑不完"的情况。
         using var session = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
         session.CancelAfter(_cfg.SessionTimeout);
@@ -385,7 +390,10 @@ public sealed class Updater
                 entry.Target.MD5, entry.TargetPath, ActionName(action), status, reason, bytes, ms, payload);
 
             var n = Interlocked.Increment(ref done);
-            progress?.Report(new UpdateProgress(n, totalWork, entry.Target.FileName, ActionName(action)));
+            // 【事实】Stage 只放阶段标识（在下载 / 在打补丁 / 在改名），"这个文件被判成什么动作"走 Action。
+            // 历史实现把动作名塞进 Stage，宿主想分辨"在核对还是在提交"只能靠猜（AGENT.md §4.7）。
+            progress?.Report(new UpdateProgress(n, totalWork, entry.Target.FileName,
+                StageFor(action), ActionName(action)));
         }
 
         // 自适应并发（§4.6）：起始 2，成功就 +1 到上限，出现失败就回退一步。
@@ -788,6 +796,9 @@ public sealed class Updater
         // 让宿主/壳（`--json`）能立刻看出"这轮为什么全在整包下载"。
         var detailOut = detail.Length > 0 ? detail : (_patchToolNote ?? string.Empty);
 
+        // 【事实】收尾：此后这一轮不再有进度。结论本身走返回值（宿主拿 `UpdateResult` 分支）。
+        _progress?.Report(new UpdateProgress(t.Total, t.Total, string.Empty, UpdateStage.Done));
+
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             sw.Elapsed, detailOut, httpVersion, payload, wire,
             _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0);
@@ -805,6 +816,14 @@ public sealed class Updater
         PlanAction.Move => "move",
         PlanAction.Patch => "patch",
         _ => "full",
+    };
+
+    /// <summary>这个动作对应哪个**阶段**（进度字段只放阶段；动作名走 <c>Action</c>，AGENT.md §4.7）。</summary>
+    private static string StageFor(PlanAction action) => action switch
+    {
+        PlanAction.Move => UpdateStage.Move,
+        PlanAction.Patch => UpdateStage.Patch,
+        _ => UpdateStage.Download,
     };
 
     private static string Classify(Exception ex) => ex switch

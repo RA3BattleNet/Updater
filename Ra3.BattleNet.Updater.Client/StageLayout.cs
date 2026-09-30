@@ -79,9 +79,17 @@ public static class StageLayout
     /// <summary>
     /// 写计划。**只在阶段一全部成功之后调用**：计划一旦存在，就代表"可以提交"，
     /// 半成品写进去会让 applier 落出一个新旧混合的树。
+    /// 【必须】原子替换（tmp + 改名，与写本地清单同款）：直接写目标文件的话，写到一半被杀会留下
+    /// **截断的 JSON** —— 它"存在"（`HasPendingPlan` 为真，就地模式会被拒）却读不动
+    /// （applier 只会说"没有可用的待提交计划"），用户白重启一次。
     /// </summary>
-    public static void SavePlan(string installRoot, StagedPlan plan) =>
-        Fs.WriteAllText(PlanPath(installRoot), JsonSerializer.Serialize(plan, JsonOptions));
+    public static void SavePlan(string installRoot, StagedPlan plan)
+    {
+        var path = PlanPath(installRoot);
+        var tmp = path + ".tmp";
+        Fs.WriteAllText(tmp, JsonSerializer.Serialize(plan, JsonOptions));
+        Fs.Place(tmp, path);
+    }
 
     /// <summary>读计划。**容错**：坏文件/缺字段一律当作"没有计划"（它只是提示）。</summary>
     public static StagedPlan? LoadPlan(string installRoot)
