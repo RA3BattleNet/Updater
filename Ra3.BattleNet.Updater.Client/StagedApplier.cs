@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Ra3.BattleNet.Updater.Share.Models;
+using Ra3.BattleNet.Updater.Share.Utilities;
 
 namespace Ra3.BattleNet.Updater.Client;
 
@@ -463,6 +464,58 @@ public sealed class StagedApplier
     /// <summary>日志是 TAB 分列的一行一记录：值里出现 TAB/换行会把列数搞乱，统一压成空格。</summary>
     private static string OneLine(string s) =>
         s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+
+    /// <summary>
+    /// 找一个可用的 applier 可执行文件（AGENT.md §12.5）。
+    ///
+    /// **布局是库定的，所以由库来解析**：宿主只该写一句 <c>FindDefaultApplierExe()</c>，
+    /// 而不是各自拼一遍"程序目录/applier_bin/&lt;rid&gt;/…" —— 那种拼法迟早会跟布局漂移，
+    /// 而漂移的后果是"宿主退出之后才发现没人来落地"。
+    ///
+    /// 查找顺序（与 <c>HdiffTool.Find</c> 的约定一致）：
+    /// <c>工具目录</c> → <c>工具目录/{rid}</c> → <c>程序目录</c> → <c>程序目录/tools[/{rid}]</c> →
+    /// <c>程序目录/applier_bin/{rid}</c> → <c>程序目录/applier_bin</c> → PATH。
+    /// 返回 <c>null</c> 表示"这台机器上找不到 applier"（宿主据此决定：交回整包 / 报错）。
+    /// </summary>
+    public static string? FindDefaultApplierExe(string? toolsDir = null)
+    {
+        // 与 HdiffTool 同一套 RID 口径；文件名不带扩展名的平台（linux/macOS）也一样
+        var exeName = OperatingSystem.IsWindows() ? "Client.Applier.exe" : "Client.Applier";
+        var rid = HdiffTool.Rid;
+        var baseDir = AppContext.BaseDirectory;
+
+        var dirs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(toolsDir))
+        {
+            dirs.Add(toolsDir!);
+            dirs.Add(Path.Combine(toolsDir!, rid));
+        }
+
+        dirs.Add(baseDir);
+        dirs.Add(Path.Combine(baseDir, "tools"));
+        dirs.Add(Path.Combine(baseDir, "tools", rid));
+        dirs.Add(Path.Combine(baseDir, "applier_bin", rid));   // ← 随包携带的位置
+        dirs.Add(Path.Combine(baseDir, "applier_bin"));
+
+        foreach (var dir in dirs)
+        {
+            var candidate = Path.Combine(dir, exeName);
+            if (Fs.Exists(candidate)) return candidate;
+        }
+
+        // PATH 兜底（与 HdiffTool 同款；找不到就是找不到，不抛）
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(path))
+        {
+            foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var candidate = Path.Combine(dir.Trim(), exeName);
+                if (Fs.Exists(candidate)) return candidate;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// 生成"宿主退出后由谁来落地"的命令（§12.5）。**库不自己 spawn**（§4.12：不改变进程生命周期），

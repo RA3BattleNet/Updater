@@ -1,0 +1,43 @@
+# Ra3.BattleNet.Updater.Client.Applier —— 落地进程
+
+客户端自更新的**落地入口**：宿主退出之后，把阶段一暂存好的那一版换上去（`AGENT.md` §12.5 阶段二/三）。
+它**只做这一件事** —— 没有窗口、不联网、不打补丁、不接受更新会话那一套参数（那些是 `Client.CLI` 的事）。
+
+> **谁用它**：宿主（或宿主的启动器）在**退出之前**把它挂起来。C# 宿主也可以让**自己的 exe** 干这件事
+> （`StagedApplier` 是库里的公共类型），那样就不需要本 exe —— 但会把宿主整套 UI 依赖带进落地进程，
+> 而落地阶段正在改名树里的文件（宿主文档 §A.2 讲的正是这个 blast radius）。
+
+## 它怎么被交付
+
+`applier_bin/{RID}/Client.Applier.exe`（**单文件、框架依赖**）由 `Share` 的 `Content` 声明分发：
+**引用客户端库的宿主，输出目录里自动就有它**，宿主不需要做任何部署。
+
+- 宿主用 `StagedApplier.FindDefaultApplierExe()` 让库自己去找（别各自拼路径）；
+- 它是清单里的**受管文件**，会随更新一起被替换（**旧 applier 落新 applier**）；
+- ⚠ 它是**签入仓库的构建产物**：改了 `Client.Applier` / `Client` / `Share` 的源码之后必须跑
+  `refresh-applier.ps1`（仓库根）。忘了刷新由守卫测试 `ApplierPackagingTests.CheckedInApplier_MatchesCurrentSources`
+  抓成红灯 —— 否则会出现"代码里有修复、随包发的是旧 exe"，测试还全绿。
+
+## 用法
+
+```
+Client.Applier.exe --root <安装目录> [--cache-dir <目录>] [--manifest-file <路径>]
+                   [--wait-for-pid <PID>] [--wait-for-name <名字>] [--wait-for-start <ticks>]
+                   [--quiescence-timeout <秒>] [--poll-seconds <秒>]
+                   [--restart <exe>] [--restart-args <原文>] [--restart-cwd <目录>] [--restart-delay <秒>]
+```
+
+宿主一般不用手写这些参数：`StagedApplier.BuildApplyCommand(exe, applierConfig)` 会生成它们
+（并把"我是谁"的身份三件套自动填好）。**不认识的参数会被忽略**（向前兼容：现场这个 exe 可能还是旧的，
+而参数是新版库生成的）。解析实现只有一份 —— 在库里的 `ApplierConfig.FromArgs`。
+
+退出码：`0` 已落地 / 本来就没东西要落地 ｜ `1` 没落地（原因见 `update.log` 的 `C` 行）｜ `2` 参数错误。
+
+## 它**不做**什么（都是故意的）
+
+- **不画窗口**：窗口归宿主。本 exe 只把事实报出去（`IProgress<UpdateProgress>`：阶段 / 计数 / 文件名 /
+  等待已过时长与时限），宿主拿它自己算进度条、状态、超时。
+- **不联网**：输入只有阶段一留在缓存里的那份清单原文；它不在就**拒绝落地**，绝不联网重取
+  （落地的是"已经规划并暂存好的那一版"，不是"线上最新版"）。
+- **不打印结果**：stdout 不是本 exe 的契约；机器可读的结论在 `update.log`
+  （`C` 行 `result`/`reason`/`detail`，以及 `R` 行的计数）。
