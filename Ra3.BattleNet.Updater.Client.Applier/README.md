@@ -18,6 +18,26 @@
   `refresh-applier.ps1`（仓库根）。忘了刷新由守卫测试 `ApplierPackagingTests.CheckedInApplier_MatchesCurrentSources`
   抓成红灯 —— 否则会出现"代码里有修复、随包发的是旧 exe"，测试还全绿。
 
+## 宿主怎么接（三步）
+
+```csharp
+// ① 阶段一：暂存（宿主还在跑）
+var cfg = new UpdateConfig { RootPath = installDir, ManifestUrl = manifestUrl, ApplyMode = ApplyMode.Staged };
+var r = new Updater(cfg).Run(progress);
+
+// ② 需要重启时：**先挂 applier，再退出**（它会等我们的 PID，所以现在挂不会打架）
+if (r.PendingRestart)
+{
+    var applierCfg = new ApplierConfig { RootPath = installDir };
+    Process.Start(StagedApplier.BuildApplyCommand(StagedApplier.FindDefaultApplierExe()!, applierCfg));
+    RequestShutdown("update staged");     // 交给你自己的主线程去关
+}
+
+// ③ 用户点关闭 → 进程真的退出 → applier 落地（窗口/提示是你的事，库只给事实字段）
+```
+要点：**不要等 applier 结束**（它等的就是宿主退出，互等即死锁）；applier 一启动就持有更新锁，
+之后**不要**再开更新会话；别把它放进带 `KILL_ON_JOB_CLOSE` 的 Job Object（细节见 [`../USAGE.md`](../USAGE.md) §2.8）。
+
 ## 用法
 
 ```

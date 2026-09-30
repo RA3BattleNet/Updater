@@ -6,17 +6,22 @@
 # 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径）
 $env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
 
-dotnet run -c Release                                        # 全套（本机实测约 40 秒 / 157 条）
+dotnet run -c Release                                        # 全套（本机实测约 42 秒 / 168 条，不含两个重活）
 dotnet run -c Release Staged                                 # 只跑名字含 "Staged" 的
 dotnet run -c Release StagedApplierTests.Apply_LandsTheStaged # 精确到方法
 ```
 
-> 上面那个 40 秒是**不带**两个重活时的实测（2026-10-01）。开了 `UPDATER_SIM_OUT` 跑版本矩阵是分钟级
-> （真 HTTP + 真 hdiffz + 上百 MB 的树），别拿这个数字去估它。
+> 上面那个 42 秒是**不带**两个重活时的实测（2026-10-01）。带上五版链模拟是 **299 秒**
+> （真 HTTP + 真 hdiffz + 上百 MB 的树）。
+>
+> ⚠ **重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（168 条），只有耗时能看出来 ——
+> 所以要跑跨版本回归，必须显式设下面那两个变量，否则容易误以为"跑过了"。
 
 - 筛选参数是**子串匹配**（`Type.Method` 的子串），不是通配符。
 - **两个可选的重活**（默认跳过，需要环境变量）：
-  - 真实历史版本端到端：`UPDATER_E2E_TREES=<三个历史版本解包目录的父目录>`
+  - 真实历史版本端到端：`UPDATER_E2E_TREES=<解包目录的父目录>` —— 该目录下要有
+    `CoronaLauncher_Setup_3.12.9269.19502`（旧）与 `CoronaLauncher_Setup_3.12.9381.2215`（新）；
+    实测：清单 8.1 s / 补丁 35.4 s（新建 480、失败 0）/ 更新 6.8 s（patch 481、内容 4.8 MB、逐字节一致）
   - 版本矩阵模拟（22 个场景 = 5 版本链上的 S01–S22）：`UPDATER_SIM_OUT=<输出目录>`，并需要该目录下已有
     `server-summary.json`（由 `_sim/deploy.ps1` 产出）；结果与日志落在该目录的 `logs/<场景>/`
 

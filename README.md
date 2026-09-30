@@ -1,4 +1,4 @@
-# RA3BattleNet Updater
+﻿# RA3BattleNet Updater
 
 文件级**增量更新**系统（C# / .NET 10）：服务端只产出**静态文件树**（可整体交给 CDN），
 客户端按内容寻址、只下载变化的部分；拿不到增量时干净回落完整下载。
@@ -24,6 +24,7 @@
 | 读 / 改**清单生成壳**（UUID 关联规则） | [`Ra3.BattleNet.Updater.XmlGenerator/README.md`](Ra3.BattleNet.Updater.XmlGenerator/README.md) |
 | 读 / 改**补丁生成壳**（hdiffz 参数取舍） | [`Ra3.BattleNet.Updater.Server.PatchGenerator/README.md`](Ra3.BattleNet.Updater.Server.PatchGenerator/README.md) |
 | 读 / 改**独立进程壳**（命令与退出码） | [`Ra3.BattleNet.Updater.Client.CLI/README.md`](Ra3.BattleNet.Updater.Client.CLI/README.md) |
+| 做**自更新**（宿主退出后落地） | [`Ra3.BattleNet.Updater.Client.Applier/README.md`](Ra3.BattleNet.Updater.Client.Applier/README.md) + [`USAGE.md`](USAGE.md) §2.8（宿主的义务） |
 | 加测试 / 看懂测试怎么组织的 | [`Ra3.BattleNet.Updater.Tests/README.md`](Ra3.BattleNet.Updater.Tests/README.md) |
 | 看随包第三方二进制与许可 | [`THIRD-PARTY.md`](THIRD-PARTY.md) |
 
@@ -51,8 +52,12 @@ dotnet build Ra3.BattleNet.sln -c Release
 
 # 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径）
 $env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
-dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套
+dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套（约 42 秒 / 168 条）
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑名字含 Staged 的
+
+# 两个"重活"默认跳过、**未设环境变量时静默跳过但仍计 PASS**（计数不变、只有耗时能看出来）：
+$env:UPDATER_SIM_OUT   = '<_sim 目录>'            # 五版链模拟（22 个场景，约 +4 分钟）
+$env:UPDATER_E2E_TREES = '<解包目录的父目录>'      # 真实历史版本端到端（需两个指定版本目录）
 ```
 
 完整的两版生成 → 发布 → 客户端更新示例见 [`USAGE.md`](USAGE.md) §5。

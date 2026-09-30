@@ -15,6 +15,7 @@
 | `Updater` + `UpdateConfig` | 跑一轮（阶段一）。`Run(progress, ct)` / `RunAsync(...)`；**绝不抛异常、不弹 UI、不退出进程** |
 | `UpdateResult` | 结果：`Outcome` / `Reason` / `Detail` + 计数 + 三个字节口径；`Applied`、`PendingRestart`、`ToJson()`（一行 JSON 契约，字段只增不改） |
 | `StagedApplier` + `ApplierConfig` | 落地（阶段二/三）。**零网络** —— `ApplierConfig` 里没有清单地址；`BuildApplyCommand(exe, applierCfg)` 生成"宿主退出后该跑什么"的命令 |
+| `StagedApplier.FindDefaultApplierExe()` | **applier 用哪个 exe**：库去找**随本库分发**的 `applier_bin/{RID}/Client.Applier.exe`（引用本库的宿主输出里自动就有它），不必自己拼路径；返回 `null` 表示这台机器上找不到 |
 | `UpdateProgress` | 进度：`Current` / `Total` / `FileName` / `Stage`（`UpdateStage.{Check,Move,Patch,Download,Done,Apply}`） |
 
 ## 最小示例

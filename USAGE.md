@@ -270,14 +270,20 @@ if (r.PendingRestart)
         RootPath = installDir,
         ApplierQuiescenceTimeout = TimeSpan.FromMinutes(10),
     };
-    Process.Start(StagedApplier.BuildApplyCommand(applierExePath, applierCfg));
+    Process.Start(StagedApplier.BuildApplyCommand(
+        StagedApplier.FindDefaultApplierExe()!,   // 随客户端库分发的那一个（别自己拼路径）
+        applierCfg));
 
     // 【要点 2】把「该重启了」交给你的主线程去处理；不要在更新线程里 Environment.Exit。
     RequestShutdown("update staged");    // 你自己的机制：消息 / Dispatcher / 原子标志
 }
 ```
 
-`applierExePath` 是宿主自己发布的 `Client.CLI` 可执行文件（或用 `dotnet Client.CLI.dll`）。
+**applier 用哪个可执行文件**：`StagedApplier.FindDefaultApplierExe()` —— 库会去找**随客户端库分发**的
+`applier_bin/{RID}/Client.Applier.exe`（引用库就自动带上，宿主不需要做任何部署；顺序照 `HdiffTool.Find`，
+找不到返回 `null`，此时该按"不能自更新"处理）。它是清单里的**受管文件**，会随更新一起被替换。
+也可以用宿主**自己的 exe**（它内部调 `StagedApplier`），但要清楚代价：那样会把宿主整套 UI 依赖带进
+落地进程，而落地正在改名树里的文件。
 
 **两个配置类型为什么是分开的**：阶段一（`UpdateConfig`）要联网、要工具目录、要并发；
 落地阶段（`ApplierConfig`）是宿主退出后**无人值守**跑的另一个进程，它只能读缓存里那一版清单。
@@ -325,6 +331,9 @@ if (r.PendingRestart)
 2. **退出动作放在主线程的关闭序列里**（更新线程只发信号），不要用 `Environment.Exit` 代替宿主的清理。
 3. **推荐直接强制重启**：暂存好后告诉用户"需要重启完成更新"，不给"稍后"选项 —— 用户确认 → 挂 applier → 退出，`tree_busy` / 白等超时这些问题都不会出现。
 4. **如果一定要给"稍后"**：用户选稍后时立刻 `Kill()` 掉已挂起的 applier（见要点 14），并且**把"挂 applier"推迟到关闭序列的最后一刻**（别在用户确认之前挂）。
+5. **用 `StagedApplier.FindDefaultApplierExe()` 拿 applier 的路径**，不要自己拼 `applier_bin/...` ——
+   布局由库定，宿主各拼一份迟早会与布局漂移，而漂移的后果是"宿主退出之后才发现没人来落地"。
+   拿到的就是**随客户端库分发**的那一个（清单里的受管文件，会随更新一起被替换）。
 
 #### 落地后自动拉起宿主（可选，默认关）
 
@@ -341,7 +350,7 @@ var applierCfg = new ApplierConfig
     RootPath = installDir,
     RestartAfterApply = true,                        // 只开这一个开关就够了
 };
-Process.Start(StagedApplier.BuildApplyCommand(applierExePath, applierCfg));
+Process.Start(StagedApplier.BuildApplyCommand(StagedApplier.FindDefaultApplierExe()!, applierCfg));
 ```
 
 `BuildApplyCommand` 是在**宿主进程里**执行的，所以它自动填好三样：要拉起的 exe（宿主自己）、
@@ -468,12 +477,21 @@ dotnet run --project Ra3.BattleNet.Updater.Client.CLI -- `
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release
 
 # 真实历史版本端到端（重活，默认跳过；需要两个环境变量）
-$env:UPDATER_E2E_TREES = "<三个历史版本解包目录的父目录>"
+# UPDATER_E2E_TREES 指向"解包目录的父目录"，且下面这两个目录要在里面：
+#   CoronaLauncher_Setup_3.12.9269.19502（旧）与 CoronaLauncher_Setup_3.12.9381.2215（新）
+$env:UPDATER_E2E_TREES  = "<解包目录的父目录>"
 $env:UPDATER_TEST_TMP   = "<空间充足的临时盘>"
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
+
+# 五版链模拟（22 个场景，真 HTTP + 真 hdiffz）：需要 _sim 里已有 server-summary.json
+$env:UPDATER_SIM_OUT = "<_sim 目录>"
+dotnet run --project Ra3.BattleNet.Updater.Tests -c Release
 ```
 
-可选环境变量：`UPDATER_SIM_OUT`（场景产物落盘目录）、`UPDATER_ISO_TREES`（GB 级大文件用例，门控）。
+- 全套（不带上面两个重活）：**168 条 / 约 42 秒**（2026-10-01 实测）；带上五版链模拟约 **299 秒**。
+- ⚠ **这两个重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（168），只有耗时能看出来。
+  跑跨版本回归必须显式设 `UPDATER_SIM_OUT` / `UPDATER_E2E_TREES`，否则会误以为"跑过了"。
+- `UPDATER_ISO_TREES`：GB 级大文件用例（3 个 Windows ISO），与跨版本无关，缺 ISO 时保持跳过。
 
 > 该测试项目自带一个反射跑器（`Tests/Program.cs`）：受限环境里 VSTest 的 testhost 会因
 > `Process.GetProcessHandle` 被拒而崩溃。测试本身是标准 xUnit `[Fact]`，
