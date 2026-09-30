@@ -32,6 +32,10 @@
 - **清单即版本身份**：`manifest.xml` 的字节与本地保存的那份比对，一次请求就能判断"要不要更新"（命中 304 时 0 字节）（§4）。
 - **文件身份 = UUID**：路径变了也认得出是同一个文件，于是改名也能打补丁、甚至 0 下载（§4 + XmlGenerator README）。
 - **失败不致命**：补丁缺失/打不上 → 静默回落完整下载；失败到阈值 → 交回宿主走整包；库不抛异常、不弹 UI（§2.3）。
+- **没有本地清单也不盲目全量**：首次安装 / 清单被删 / 清单损坏时，按**磁盘哈希**逐个核对受管文件，
+  已经等于远端的判为「无需更新」（带宽 0；全都命中就直接判「已最新」）。**绝不伪造版本声明** ——
+  合成的基线只影响本次规划，本地清单仍然只在"验证通过"或"落地成功"之后才写（§2.5 的
+  `AdoptLocalTreeWhenNoBaseline`）。
 - **可观测**：每轮写 `update.log`（S/F/R 三种行），结果里给内容字节、payload 与**真正上网的字节**（§2.6）。
 - **两种落地路线**：默认 `InPlace` 就地替换；**自更新**用 `ApplyMode.Staged` —— 阶段一一个字节都不动现有树，宿主退出后由独立 applier 落地（§2.8）。
 
@@ -148,8 +152,9 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `MaxConcurrency` | 4 | 并发**上限**；起始固定 2，全部成功才逐步加，出现失败就回退 |
 | `MinFailuresForHostFallback` | 5 | 失败容忍度下限（`max(该值, ceil(比例 × 待处理文件数))`） |
 | `FailRatioForHostFallback` | 0.10 | 失败容忍度比例 |
-| `FullPackageThresholdFiles` / `...Ratio` | 0 / 0（关） | 可选保险丝：待下载文件数/占比超阈值就交回宿主 |
+| `FullPackageThresholdFiles` / `...Ratio` | 0 / 0（关） | 可选保险丝：待下载文件数/占比超阈值就交回宿主。**开着它就不要关 `AdoptLocalTreeWhenNoBaseline`**（否则没有本地清单时待下载数 = 全部文件，必然撞阈值） |
 | `FullPackageRatioMinFiles` | 50 | 占比判据生效的最小文件数 |
+| `AdoptLocalTreeWhenNoBaseline` | `true` | **没有可信基线**（本地清单不存在或损坏）时，按磁盘哈希逐个核对受管文件，命中的判为「无需更新」；全部命中就直接判「已最新」（带宽 0）。只影响**本次规划**，不落盘、不声称版本。已有可用本地清单时本项不生效 |
 | `LogPath` | `<LocalApplicationData>/updater-logs/<安装根指纹>/update.log` | 日志路径；**故意不放临时目录**（日志是事后要看的东西） |
 | `MaxLogBytes` | 8 MiB | 超过即轮转为 `update.log.1`（只留一代）；0 = 不轮转 |
 | `SessionTimeout` | 2 小时 | 整轮时限（最后一道保险） |
@@ -182,6 +187,8 @@ Client.CLI --root <安装目录> --manifest-url <清单地址> [选项]
   --exclude <列表>          --fallback <列表>    --concurrency <N>
   --base-url <地址>         内容基准地址（清单与内容可不同源；不填 = 清单所在目录）
   --threshold-files <N>     --threshold-ratio <R>  --verify-unchanged   --json
+  --no-adopt-local-tree     关掉「没有本地清单时按磁盘哈希合成基线」（默认开；关掉它会让
+                            首次更新直接撞 --threshold-* 的工作量保险丝）
   --apply-mode <模式>       inplace（默认，就地替换）/ staged（只暂存，宿主退出后由 applier 落地）
 ```
 

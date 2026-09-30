@@ -149,6 +149,22 @@ public class VersionMatrixSimulation
         return sum;
     }
 
+    /// <summary>
+    /// v<paramref name="from"/> → v<paramref name="to"/> 之间"内容变了或新增"的**受管**文件数
+    /// （只看两份清单、不读盘；`Mode=Skip` 的条目不参与更新，所以不算）。
+    /// 用途：S22 要在"没有本地清单"的前提下把保险丝阈值设在**真实工作量**上，
+    /// 而这个数正好等于"树是 v_from 时，按磁盘核对之后需要下载的文件数"。
+    /// </summary>
+    private static int ChangedFileCount(int from, int to)
+    {
+        var old = Manifest(from).Manifest.Files
+            .ToDictionary(f => f.RelativePath(), f => f.MD5, StringComparer.OrdinalIgnoreCase);
+        return Manifest(to).Manifest.Files.Count(f =>
+            f.Mode != FileModeEnum.Skip
+            && (!old.TryGetValue(f.RelativePath(), out var md5)
+                || !string.Equals(md5, f.MD5, StringComparison.OrdinalIgnoreCase)));
+    }
+
     // ---------------------------------------------------------------- 产物落盘
 
     private sealed record Artifacts(int Requests, string Summary);
@@ -427,6 +443,91 @@ public class VersionMatrixSimulation
         Assert.Equal(0, r.FailedCount);
         Assert.True(diff.Clean, diff.Text);
         CleanupClient(client);
+    }
+
+    /// <summary>
+    /// B-2：树已经等于远端、但**没有**本地清单 → 逐文件核对之后直接判"已最新"，**零内容下载**。
+    /// 与 S07 的区别正是那条最容易写错的分支：S07 是"树落后一版、少下未变文件"，
+    /// 本场景是"一个字节都不用下" —— 它必须收尾成 `UpToDate`（暂存模式下若走完流程会写出空计划、
+    /// 让用户白重启一次）。
+    /// </summary>
+    [Fact]
+    public void S21_无本地清单但树已是最新_直接判已最新且零内容下载()
+    {
+        if (NotReady()) return;
+        const string name = "S21_no_baseline_but_tree_matches";
+        Publish(5);
+        var client = NewClient(name, 5, withLocalManifest: false);
+        using var http = new TestHttpServer(ServerDir);
+
+        var (r, wire) = RunMeasured(client, http);
+        var diff = Compare(5, client);
+        var wrote = File.Exists(Path.Combine(client, "manifest.xml"));
+        var extra = $"- 本地清单（逐文件核对通过之后才写）：{(wrote ? TestSupport.Md5File(Path.Combine(client, "manifest.xml")) : "没写")}" +
+                    $" == v5.xml？{wrote && TestSupport.Md5File(Path.Combine(client, "manifest.xml")) == TestSupport.Md5File(ManifestPath(5))}\n" +
+                    "- 期望**内容字节 = 0**：只取清单，不取任何 `files/` 或 `patches/`";
+        Capture(name, "没有本地清单、磁盘逐字节等于 v5：必须退化为按磁盘哈希核对，直接判已最新（零内容下载）",
+            client, r, diff.Text, 0, extra, wire);
+
+        Assert.Equal(UpdateOutcome.UpToDate, r.Outcome);
+        Assert.Equal(0, r.BytesDownloaded);
+        Assert.Equal(0, r.Full + r.Patched + r.Moved);
+        Assert.Equal(r.Total, r.Skipped);                       // 每个受管条目都按磁盘哈希命中
+        Assert.True(diff.Clean, diff.Text);
+        Assert.Equal(TestSupport.Md5File(ManifestPath(5)),
+            TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
+        CleanupClient(client);
+    }
+
+    /// <summary>
+    /// B-2 × 工作量保险丝（AGENT.md §4.4 的实施约束），**在真实规模上**钉一次。
+    /// 阈值取"真实变更文件数 + 1"：开着合成基线时保险丝看到的是真实工作量，顺利走完；
+    /// 关掉它时计划数 = **全部文件**，于是同一棵树、同一个阈值会先一步折回宿主整包 ——
+    /// 而那时一个字节都还没下（保险丝在任何 I/O 之前返回）。
+    /// </summary>
+    [Fact]
+    public void S22_无本地清单时_保险丝看到的必须是真实工作量()
+    {
+        if (NotReady()) return;
+        const string name = "S22_no_baseline_with_fuse";
+        Publish(5);
+        var changed = ChangedFileCount(4, 5);
+        var threshold = changed + 1;
+        using var http = new TestHttpServer(ServerDir);
+
+        // ① 默认（合成基线开）：保险丝看到的是真实工作量 → 正常更新完
+        var on = NewClient(name + "-on", 4, withLocalManifest: false);
+        var (rOn, wireOn) = RunMeasured(on, http, c => c with { FullPackageThresholdFiles = threshold });
+        var diffOn = Compare(5, on);
+        Capture(name + "-on", $"无本地清单 + 阈值 {threshold}（= 真实变更 {changed} + 1）：不得折回宿主，必须正常更新",
+            on, rOn, diffOn.Text, BaselineBytes(4, 5),
+            $"- 变更文件数（按 v4/v5 两份清单算，见 ChangedFileCount）：{changed}\n" +
+            $"- 阈值：{threshold}（只比真实工作量高 1）", wireOn);
+
+        Assert.Equal(UpdateOutcome.Updated, rOn.Outcome);
+        Assert.NotEqual(UpdateReasons.WorkloadTooLarge, rOn.Reason);
+        Assert.Equal(0, rOn.Patched);                                   // 没有可信前身 ⇒ 不试补丁
+        Assert.Equal(changed, rOn.Full);                                // 要下的**正好**是变更文件
+        Assert.True(diffOn.Clean, diffOn.Text);
+        CleanupClient(on);
+
+        // ② 对照：关掉合成基线 → 计划数 = 全部文件 → 折回宿主整包（且树一个字节没动）
+        var off = NewClient(name + "-off", 4, withLocalManifest: false);
+        var (rOff, wireOff) = RunMeasured(off, http, c => c with
+        {
+            FullPackageThresholdFiles = threshold,
+            AdoptLocalTreeWhenNoBaseline = false,
+        });
+        Capture(name + "-off", "同一棵树、同一个阈值，但关掉合成基线：计划数 = 全部文件 → 折回宿主整包（这就是要防的那件事）",
+            off, rOff, Compare(5, off).Text, BaselineBytes(4, 5),
+            $"- 关掉 `AdoptLocalTreeWhenNoBaseline` 之后，计划里的待下载数 = 全部文件 ⇒ 阈值 {threshold} 必然被撞\n" +
+            "- 这正是 §4.4 那条实施约束：**开着阈值就不要关它**", wireOff);
+
+        Assert.Equal(UpdateOutcome.NeedsHostFallback, rOff.Outcome);
+        Assert.Equal(UpdateReasons.WorkloadTooLarge, rOff.Reason);
+        Assert.Equal(0, rOff.BytesDownloaded);
+        Assert.True(Compare(4, off).Clean, "保险丝在任何下载之前就返回，树必须还是 v4（一个字节都没动）");
+        CleanupClient(off);
     }
 
     [Fact]

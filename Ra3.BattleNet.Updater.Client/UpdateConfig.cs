@@ -155,6 +155,24 @@ public sealed record UpdateConfig
     /// </summary>
     public bool VerifyUnchangedFiles { get; init; }
 
+    /// <summary>
+    /// **没有可信基线**（本地清单不存在，或它坏了）时，是否用**磁盘哈希**合成一份「仅本次规划」的基线：
+    /// 逐个核对受管文件，磁盘上已经是目标内容的判成「无需更新」。默认 **true**（AGENT.md §4.10）。
+    ///
+    /// 用它的理由不是省带宽这一点：**没有基线时工作量保险丝会看到假的工作量** ——
+    /// 计划里每个文件都是「完整下载」，于是即使树 90% 已经对，也会先一步判"工作量过大"、
+    /// 折回宿主整包（§4.4 的实施约束就是这条）。合成基线发生在**规划之前**，保险丝才看到真实工作量。
+    ///
+    /// 【重要】因此**开着 <see cref="FullPackageThresholdFiles"/> / <see cref="FullPackageThresholdRatio"/>
+    /// 时不要关掉本项**：首次更新（或重装后第一次运行）没有本地清单，会**直接撞阈值**。
+    /// 关掉它等于放弃这条保护，宿主必须自己知情。
+    ///
+    /// 【必须】本项只影响**本次计划**：合成出来的基线不落盘，本地清单仍然只在"逐文件哈希验证通过"
+    /// 或"落地成功"之后才写，且写的永远是远端原文。清单是验证的产物，不是假设的产物。
+    /// 已有可用的本地清单时本项**不生效**（绝不用磁盘推断去覆盖一个存在的基线）。
+    /// </summary>
+    public bool AdoptLocalTreeWhenNoBaseline { get; init; } = true;
+
     public string ResolveLocalManifestPath() => LocalManifestPath ?? Path.Combine(RootPath, "manifest.xml");
 
     public string ResolveCacheDir() =>

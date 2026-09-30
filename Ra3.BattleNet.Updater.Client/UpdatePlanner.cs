@@ -56,9 +56,7 @@ public static class UpdatePlanner
         bool patchAvailable = true)
     {
         var root = Path.GetFullPath(cfg.RootPath);
-        var excluded = new HashSet<string>(cfg.ExcludedDirs.Select(Normalize), StringComparer.OrdinalIgnoreCase);
-        // 暂存区是库自己的工作目录（§12.3）：即便某个 manifest 误列了它，也绝不受管。
-        excluded.Add(Normalize(StageLayout.DirName));
+        var excluded = Excluded(cfg);
 
         var byUuid = new Dictionary<Guid, ManifestFile>();
 
@@ -151,6 +149,31 @@ public static class UpdatePlanner
 
     public static string Full(string root, string relative) =>
         Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>
+    /// 远端清单里**真正受管**的条目（`Mode != Skip` 且不在排除目录里，§4.2）—— 也就是规划器会
+    /// 逐个判定的那一批。
+    ///
+    /// 「没有可信基线时按磁盘哈希合成基线」（B-2 / §4.10）必须用**同一个**口径去挑候选：它若自己去
+    /// 哈希一批规划器根本不看的文件，最轻是白读一遍树，最重是把"本该照常更新"的文件判成"磁盘上已有"。
+    /// 所以这里只留一份定义，两边共用。
+    /// </summary>
+    internal static List<ManifestFile> ManagedTargets(ManifestModel remote, UpdateConfig cfg)
+    {
+        var excluded = Excluded(cfg);
+        return remote.Manifest.Files
+            .Where(f => f.Mode != FileModeEnum.Skip && !IsExcluded(f.RelativePath(), excluded))
+            .ToList();
+    }
+
+    /// <summary>不受管目录（顶层目录名，大小写不敏感）+ 库自己的工作目录（§12.3）。</summary>
+    private static HashSet<string> Excluded(UpdateConfig cfg)
+    {
+        var excluded = new HashSet<string>(cfg.ExcludedDirs.Select(Normalize), StringComparer.OrdinalIgnoreCase);
+        // 暂存区是库自己的工作目录：即便某个 manifest 误列了它，也绝不受管。
+        excluded.Add(Normalize(StageLayout.DirName));
+        return excluded;
+    }
 
     private static bool IsExcluded(string relative, HashSet<string> excluded)
     {

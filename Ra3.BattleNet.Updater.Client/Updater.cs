@@ -230,9 +230,44 @@ public sealed class Updater
                 $"本地清单里有逃出安装根的路径（例：{unsafeLocal}）：整个更新拒绝执行",
                 manifest.HttpVersion ?? string.Empty);
 
-        var plan = UpdatePlanner.Build(remote, local, _cfg, _patchToolAvailable);
+        // 没有可信基线（`local == null`：没有本地清单，或它坏了）时**不盲目全量**：
+        // 用库自己的口径逐文件算磁盘哈希，合成一份「仅本次规划」的基线（AGENT.md §4.10）。
+        // 为什么必须在**规划之前**：工作量保险丝（§4.4）看的是计划里的待下载数，而"没有基线"
+        // 会让它把"全部文件"都算成要下载 —— 树明明已经对，却先一步折回宿主整包（§4.4 里那条
+        // 实施约束讲的就是它）。合成基线把命中的文件判成 `Skip`，保险丝于是看到**真实**工作量。
+        // 【必须】这份基线**不落盘**：唯一允许写本地清单的时机是「逐文件哈希验证通过」（下面那条
+        // 全部命中）或「落地成功」（既有路径）。清单是验证的产物，不是假设的产物。
+        AdoptedBaseline? adopted;
+        try
+        {
+            adopted = local is null && _cfg.AdoptLocalTreeWhenNoBaseline
+                ? await AdoptLocalTreeAsync(remote, progress, ct).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException)
+        {
+            var detail = externalCt.IsCancellationRequested
+                ? "已取消"
+                : $"超出整体时限（{_cfg.SessionTimeout}）";
+            return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.IoError, detail);
+        }
+
+        var plan = UpdatePlanner.Build(remote, adopted?.Local ?? local, _cfg, _patchToolAvailable);
         tally.Total = plan.Total;
         tally.Skip = plan.Unchanged;
+
+        // 受管文件**全部命中** ⇒ 这棵树是逐文件核过的、就是远端那一版 → 直接收尾（带宽 0）。
+        // 【必须】不要让它走完正常流程：暂存模式下会写出一个**空计划**并返回 `Staged`，
+        // 宿主于是提示"需要重启"，用户白重启一次而什么都没发生。此时写本地清单（远端原文）+ ETag 就够。
+        if (adopted is { AllHit: true })
+        {
+            var manifestTmp = localManifestPath + ".tmp";
+            Fs.WriteAllBytes(manifestTmp, remoteBytes);
+            Fs.Place(manifestTmp, localManifestPath);
+            SaveEtag(etagPath, manifest.ETag);
+            return Finish(log, tally, sw, UpdateOutcome.UpToDate, UpdateReasons.None, string.Empty,
+                manifest.HttpVersion ?? string.Empty);
+        }
 
         // 补丁工具不可用时，在 Detail 里留一句（否则用户只会看到"这次怎么全在整包下载"）——
         // 归因的权威位置仍是 F 行的 reason=patch_tool_missing。
@@ -432,6 +467,77 @@ public sealed class Updater
         var outcome = tally.Fail >= tolerance ? UpdateOutcome.NeedsHostFallback : UpdateOutcome.Failed;
         var why = tally.Fail >= tolerance ? UpdateReasons.LocalCorrupt : UpdateReasons.DownloadFailed;
         return Finish(log, tally, sw, outcome, why, $"{tally.Fail} 个文件失败");
+    }
+
+    /// <summary>
+    /// 没有可信基线时，用**磁盘哈希**合成一份「仅本次规划」的基线（AGENT.md §4.10）。
+    ///
+    /// 口径必须与规划器**完全一致**，所以"哪些远端条目受管"和"相对路径怎么拼"都直接复用
+    /// <see cref="UpdatePlanner"/>（`ManagedTargets` / `Full`）—— 客户端自己再抄一遍是这套设计里最容易
+    /// 出事的地方：一旦有偏差就会写出**错的基线**，而"清单说完成、文件其实没换"是本设计最怕的静默故障。
+    ///
+    /// 只做一件事：**命中**的远端条目原样进合成基线（于是规划器把它们判成 `Skip`）。没命中的**不进**
+    /// 基线 —— 没有可信前身就不能打补丁，只能完整下载（`no_local` 那条路），顺带也就不可能把两个
+    /// 不同文件接在一起。
+    ///
+    /// 进度按库自己的口径报 `check`（不新增枚举）：宿主能显示"正在核对本地文件 N/M"。
+    /// 大树上逐文件回调太密，按 ~100 次封顶抽稀，最后一条一定报。
+    /// </summary>
+    private async Task<AdoptedBaseline> AdoptLocalTreeAsync(ManifestModel remote,
+        IProgress<UpdateProgress>? progress, CancellationToken ct)
+    {
+        var root = Path.GetFullPath(_cfg.RootPath);
+        var targets = UpdatePlanner.ManagedTargets(remote, _cfg);
+        var step = Math.Max(1, targets.Count / 100);
+        var synthetic = new ManifestModel(new Version(1, 0, 0), "adopted-from-disk");
+        var hits = 0;
+
+        for (var i = 0; i < targets.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var target = targets[i];
+            if (await MatchesDiskAsync(UpdatePlanner.Full(root, target.RelativePath()), target.MD5, ct)
+                    .ConfigureAwait(false))
+            {
+                hits++;
+                synthetic.Manifest.Files.Add(target);   // 原样引用：规划器只读 UUID / MD5 / 路径
+            }
+
+            if (i == targets.Count - 1 || i % step == 0)
+                progress?.Report(new UpdateProgress(i + 1, targets.Count, target.FileName, UpdateStage.Check));
+        }
+
+        return new AdoptedBaseline(synthetic, targets.Count, hits);
+    }
+
+    /// <summary>
+    /// 磁盘上这个路径是否**就是**目标内容。读不了（被独占、权限不足、IO 错误）就当作"不是" ——
+    /// 这里回答的是"能不能少下一次"，答案不确定时应当继续往下走，让正常流程去**如实报出那个具体原因**。
+    /// 取消/超时是例外：那是整轮的中止信号，必须照常往上抛（否则会被静默当成"文件不一致"）。
+    /// </summary>
+    private static async Task<bool> MatchesDiskAsync(string path, string expectedMd5, CancellationToken ct)
+    {
+        if (!Fs.Exists(path)) return false;
+        try
+        {
+            return string.Equals(await Hashing.Md5FileAsync(path, ct).ConfigureAwait(false),
+                expectedMd5, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>「没有可信基线时合成基线」的结果。只描述**本次规划**，不落盘、不作为版本声明。</summary>
+    private sealed record AdoptedBaseline(ManifestModel Local, int Checked, int Hits)
+    {
+        /// <summary>受管文件全部命中磁盘 ⇒ 这棵树就是远端那一版（逐文件核过）。</summary>
+        public bool AllHit => Hits == Checked;
     }
 
     /// <summary>

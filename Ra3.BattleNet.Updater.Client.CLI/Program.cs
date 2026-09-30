@@ -65,6 +65,9 @@ internal static class Program
         string? baseUrl = null;
         var concurrency = 4;
         var verifyUnchanged = false;
+        // 没有可信基线时按磁盘哈希合成规划输入（AGENT.md §4.10）：默认**开**。
+        // 关掉它会让"首次更新 / 重装后第一次运行"撞上工作量保险丝（§4.4），只在做对照实验时才关。
+        var adoptLocalTree = true;
         var applyMode = ApplyMode.InPlace;
         int? waitForPid = null;
         string? waitForName = null;
@@ -97,6 +100,7 @@ internal static class Program
                 case "--threshold-files": thresholdFiles = int.Parse(Next(args, ref i)); break;
                 case "--threshold-ratio": thresholdRatio = double.Parse(Next(args, ref i)); break;
                 case "--verify-unchanged": verifyUnchanged = true; break;
+                case "--no-adopt-local-tree": adoptLocalTree = false; break;
                 case "--apply-mode": applyMode = ParseApplyMode(Next(args, ref i)); break;
                 case "--apply": break;
                 case "--wait-for-pid": waitForPid = int.Parse(Next(args, ref i)); break;
@@ -132,6 +136,7 @@ internal static class Program
             FullPackageThresholdFiles = thresholdFiles,
             FullPackageThresholdRatio = thresholdRatio,
             VerifyUnchangedFiles = verifyUnchanged,
+            AdoptLocalTreeWhenNoBaseline = adoptLocalTree,
             ApplyMode = applyMode,
             WaitForProcessId = waitForPid,
             WaitForProcessName = waitForName,
@@ -179,6 +184,8 @@ internal static class Program
         Console.WriteLine("  --threshold-ratio <R>     待下载文件数占比阈值（默认 0 = 关闭）");
         Console.WriteLine("  --apply-mode <模式>       inplace（默认，就地替换）或 staged（只暂存，宿主退出后由 applier 落地）");
         Console.WriteLine("  --verify-unchanged        对判定无需更新的文件重新校验哈希（慢）");
+        Console.WriteLine("  --no-adopt-local-tree     关掉「没有本地清单时按磁盘哈希合成基线」（默认开；");
+        Console.WriteLine("                            关掉它会让首次更新直接撞 --threshold-* 的工作量保险丝）");
         Console.WriteLine("  --json                    只输出一行 JSON 结果");
         Console.WriteLine();
         Console.WriteLine("暂存更新的落地（宿主退出后跑；库不自己 spawn 进程，见 AGENT.md §12.5）：");

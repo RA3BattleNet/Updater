@@ -120,11 +120,16 @@ public class EndToEndTests
         var result = new ClientUpdater(cfg).Run();
 
         // 必须退化为「按磁盘哈希校验」：花 CPU，不花带宽
-        Assert.Equal(UpdateOutcome.Updated, result.Outcome);
+        // 【2026-10-01 行为变更】全部命中时收尾成 `UpToDate`（而不是走完流程报 `Updated`）：
+        // 一个字节都不用下、也没有文件被换，`UpToDate` 才是如实的那个结果；暂存模式下这条更要紧 ——
+        // 走完流程会写出一个**空计划**并返回 `Staged`，宿主于是提示"需要重启"，用户白重启一次。
+        // 清单仍然照样落盘（远端原文），所以下一次运行该走的捷径一个都不少。
+        Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
         Assert.Equal(3, result.Skipped);
         Assert.Equal(0, result.Full);
         Assert.Equal(0, result.BytesDownloaded);
         Assert.Equal(0, http.NotFound);   // 没有前身，连补丁都不该去探测
+        Assert.Equal(TestSupport.Md5File(m1), TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
     }
 
     [Fact]
