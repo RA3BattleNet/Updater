@@ -3,6 +3,14 @@
 宿主**不是 C#**、或需要**在宿主退出后落地**时的入口。它只是
 `Ra3.BattleNet.Updater.Client` 的命令行包装：解析参数 → 调库 → 打印一行 JSON。
 
+> **`--apply` 是谁的参数**：它是**本壳**的一个开关（"这次只做落地，不跑更新会话"），
+> 库也会把它写进 `StagedApplier.BuildApplyCommand` 生成的那条命令行，交给宿主在退出前挂起来。
+> 宿主**复用自己 exe** 当 applier 时（例如 `Host.exe --apply …`），那条命令行的解析由**宿主自己**做 ——
+> 那不是本壳；本壳只负责 `Client.CLI --apply …` 这一种。
+> **两种模式认的是两个不同的配置类型**：不带 `--apply` 认 `UpdateConfig`（要清单地址），
+> 带 `--apply` 认 `ApplierConfig`（**没有**清单地址 —— 落地阶段零网络）。
+
+
 ## 用法
 
 ```

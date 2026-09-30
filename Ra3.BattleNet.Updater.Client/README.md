@@ -3,6 +3,37 @@
 > 面向**要改这个库的人**。只想"用它"的话看 [`../USAGE.md`](../USAGE.md) §2（接入）
 > 与 §2.8（宿主集成 / 自更新 / applier）。
 
+## 它是什么 / 谁用（一句话）
+
+宿主（游戏客户端 / 启动器）引用本库 → `new Updater(cfg).Run()` 拿到 `UpdateResult` → 按 `Outcome` 分支走。
+要替换宿主**自己的** exe/dll（自更新）就用暂存模式：阶段一只暂存，宿主退出后由 `StagedApplier` 落地。
+
+## 公共接口（写宿主时只用碰这四组）
+
+| 类型 | 用途 |
+|---|---|
+| `Updater` + `UpdateConfig` | 跑一轮（阶段一）。`Run(progress, ct)` / `RunAsync(...)`；**绝不抛异常、不弹 UI、不退出进程** |
+| `UpdateResult` | 结果：`Outcome` / `Reason` / `Detail` + 计数 + 三个字节口径；`Applied`、`PendingRestart`、`ToJson()`（一行 JSON 契约，字段只增不改） |
+| `StagedApplier` + `ApplierConfig` | 落地（阶段二/三）。**零网络** —— `ApplierConfig` 里没有清单地址；`BuildApplyCommand(exe, applierCfg)` 生成"宿主退出后该跑什么"的命令 |
+| `UpdateProgress` | 进度：`Current` / `Total` / `FileName` / `Stage`（`UpdateStage.{Check,Move,Patch,Download,Done,Apply}`） |
+
+## 最小示例
+
+```csharp
+var cfg = new UpdateConfig { RootPath = installDir, ManifestUrl = manifestUrl };   // 就地更新
+var r = new Updater(cfg).Run();
+switch (r.Outcome)
+{
+    case UpdateOutcome.UpToDate:
+    case UpdateOutcome.Updated:           break;                          // 直接启动
+    case UpdateOutcome.Staged:            /* 仅暂存模式会出现：提示重启 */   break;
+    case UpdateOutcome.NeedsHostFallback: /* 走你自己的整包逻辑 */          break;
+    case UpdateOutcome.Failed:            /* 提示重试；r.Detail 里有原因 */ break;
+}
+```
+
+自更新（`ApplyMode.Staged`）、applier 的挂法与全部义务见 [`../USAGE.md`](../USAGE.md) §2.8。
+
 ## 模块地图（按这个顺序读）
 
 | 文件 | 干什么 |

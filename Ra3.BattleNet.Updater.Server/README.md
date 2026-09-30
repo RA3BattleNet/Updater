@@ -8,6 +8,23 @@
 | `ManifestGenerator.cs` | 扫描目录生成清单：UUID 继承（同名/同内容/路径派生/自动关联）、生成期自检、报告文本 |
 | `PatchGenerator.cs` | 生成**纯静态**服务端树：完整文件落 `files/{md5}.bin`，内容对补丁落 `patches/{old}_{new}.bin`（old 在前），并校验"补丁确实能把旧文件还原成新文件" |
 
+## 公共接口
+
+| 成员 | 用途 |
+|---|---|
+| `ManifestGenerator.Generate(targetDir, oldManifestPath, excludeDirs, oldRoot?, toolsDir?, autoLink?)` → `ManifestGenerationResult` | 扫目录生成清单；UUID 继承与自动关联都在里面。报告文本用 `ManifestGenerator.FormatReport(result, oldManifestPath, oldRoot)` |
+| `PatchGenerator.Generate(newManifestPath, newRoot, baselines, outputDir, minFileSize?, verify?, prune?, toolsDir?, compressFiles?)` → `PatchGenerationSummary` | 产出 `files/` + `patches/`。`verify: true`（默认）会真的把补丁打一遍再比对 |
+| `Baseline(ManifestPath, RootPath)` | 一个保留窗口内的基线版本（补丁的"旧"那一侧） |
+
+## 最小示例（两版链式生成 + 发布服务端树）
+
+```csharp
+ManifestGenerator.Generate(v1Dir, null, []).Manifest.SaveToXml("v1.xml");                       // 第一版：无基线
+ManifestGenerator.Generate(v2Dir, "v1.xml", [], oldRoot: v1Dir).Manifest.SaveToXml("v2.xml");   // 之后每版都必须给基线
+PatchGenerator.Generate("v2.xml", v2Dir, [new Baseline("v1.xml", v1Dir)], serverDir);
+File.Copy("v2.xml", Path.Combine(serverDir, "manifest.xml"), overwrite: true);   // manifest.xml 是发布开关，最后传
+```
+
 ## 发布侧的三条口径
 
 1. **输出永远是静态文件树**，不含任何索引文件 —— URL 可由哈希直接推导，客户端不需要索引。
