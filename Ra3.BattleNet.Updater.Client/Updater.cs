@@ -13,7 +13,17 @@ namespace Ra3.BattleNet.Updater.Client;
 public sealed class Updater
 {
     private readonly UpdateConfig _cfg;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _blobLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// **按缓存里的文件路径**串行化：同一个 blob / 同一个补丁文件，同一时刻只允许一个任务动它。
+    ///
+    /// 为什么必须有：协议是**内容寻址**的，所以两条清单条目可能算出**同一个**缓存文件 ——
+    /// 完整下载时是 `files/{md5}.bin`（目标内容相同），打补丁时是 `patches/{old}_{new}.bin`
+    /// （内容对相同，服务端也只产出一个文件）。而两条条目的**落地点不同**，于是"下载 / 解压 / 校验"
+    /// 会在同一个中间文件上并发相撞（实测：Windows 共享冲突的 `IOException` 直接冲出库）。
+    /// 【禁止】按"条目"加锁 —— 那样锁不住真正共享的东西。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>本会话的 HTTP 客户端，仅用于把请求数写进日志（一次只跑一个会话）。</summary>
     private HttpFetcher? _fetcher;
@@ -630,12 +640,25 @@ public sealed class Updater
 
             case PlanAction.Patch:
             {
-                var (ok, reason, bytes, payload) = await TryPatchAsync(entry, fetcher, cacheDir, ct).ConfigureAwait(false);
-                if (ok) return (PlanAction.Patch, LogStatus.Ok, UpdateReasons.None, bytes, payload);
+                // 补丁这条路上的**任何**意外（中间文件被兄弟任务占着、IO 错误…）都按"这个文件打不上补丁"
+                // 处理 → 与 Move / Full 对齐：**回落完整下载**，绝不往外抛（§4.12 绝不抛异常）。
+                // 【必须】只捕非取消异常：取消/超时要照常往上抛，交给调度器收尾（§4.6）。
+                long patchPayload = 0;
+                try
+                {
+                    var (ok, reason, bytes, payload) = await TryPatchAsync(entry, fetcher, cacheDir, ct).ConfigureAwait(false);
+                    patchPayload = payload;
+                    if (ok) return (PlanAction.Patch, LogStatus.Ok, UpdateReasons.None, bytes, payload);
 
-                // 补丁失败 → 回落完整下载：把已经为补丁花掉的字节也算进这一行（否则"真花了多少带宽"会少算）
-                var fallback = await FullAsync(entry, fetcher, cacheDir, reason, ct).ConfigureAwait(false);
-                return fallback with { Payload = fallback.Payload + payload };
+                    // 补丁失败 → 回落完整下载：把已经为补丁花掉的字节也算进这一行（否则"真花了多少带宽"会少算）
+                    var fallback = await FullAsync(entry, fetcher, cacheDir, reason, ct).ConfigureAwait(false);
+                    return fallback with { Payload = fallback.Payload + payload };
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    var fallback = await FullAsync(entry, fetcher, cacheDir, Classify(ex), ct).ConfigureAwait(false);
+                    return fallback with { Payload = fallback.Payload + patchPayload };
+                }
             }
 
             default:
@@ -651,7 +674,14 @@ public sealed class Updater
         }
     }
 
-    /// <summary>尝试补丁：GET patches/{old}_{new}.bin，404 即回落（§3.3 / §4.3）。</summary>
+    /// <summary>
+    /// 尝试补丁：GET patches/{old}_{new}.bin，404 即回落（§3.3 / §4.3）。
+    ///
+    /// 【必须】整段（"看缓存有没有 → 下载 → 解压 → 校验 → 就位"）都在同一把**按补丁路径**的锁里：
+    /// 两条清单条目只要内容对相同，算出来的 `patchPath` 与 `patchPath + ".out"` 就是**同一个文件**
+    /// （服务端按内容对命名，一个内容对只产出一个 `.bin`），而它们的落地点不同 —— 不串行化就会出现
+    /// "一个在写、另一个在删/校验/改名"，Windows 上直接是共享冲突的 IOException。
+    /// </summary>
     private async Task<(bool Ok, string Reason, long Bytes, long Payload)> TryPatchAsync(
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, CancellationToken ct)
     {
@@ -661,37 +691,46 @@ public sealed class Updater
         var patchName = UpdaterProtocol.PatchFileName(entry.PredecessorHash, entry.Target.MD5);
         var patchPath = Path.Combine(cacheDir, patchName);
 
-        long bytes = 0, payload = 0;
-        if (!Fs.Exists(patchPath))
+        var gate = _fileLocks.GetOrAdd(patchPath, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            var got = await FetchAsync(fetcher, UpdaterProtocol.PatchRelativePath(entry.PredecessorHash, entry.Target.MD5), patchPath, ct).ConfigureAwait(false);
-            if (!got.Ok)
-                return (false, got.StatusCode == 404 ? UpdateReasons.NoPatch : UpdateReasons.PatchFailed, 0, got.PayloadBytes);
-            bytes = got.Bytes;
-            payload = got.PayloadBytes;
-        }
+            long bytes = 0, payload = 0;
+            if (!Fs.Exists(patchPath))
+            {
+                var got = await FetchAsync(fetcher, UpdaterProtocol.PatchRelativePath(entry.PredecessorHash, entry.Target.MD5), patchPath, ct).ConfigureAwait(false);
+                if (!got.Ok)
+                    return (false, got.StatusCode == 404 ? UpdateReasons.NoPatch : UpdateReasons.PatchFailed, 0, got.PayloadBytes);
+                bytes = got.Bytes;
+                payload = got.PayloadBytes;
+            }
 
-        var outPath = patchPath + ".out";
-        Fs.Delete(outPath);
-
-        if (!await HdiffTool.ApplyAsync(_cfg.ResolveToolsDir(), entry.PredecessorPath, patchPath, outPath, ct)
-                .ConfigureAwait(false))
-        {
-            Fs.Delete(patchPath);
-            return (false, UpdateReasons.PatchFailed, bytes, payload);
-        }
-
-        if (!string.Equals(
-                await Hashing.Md5FileAsync(outPath, ct).ConfigureAwait(false),
-                entry.Target.MD5, StringComparison.OrdinalIgnoreCase))
-        {
+            var outPath = patchPath + ".out";
             Fs.Delete(outPath);
-            Fs.Delete(patchPath);
-            return (false, UpdateReasons.PatchFailed, bytes, payload);
-        }
 
-        Fs.Place(outPath, PlacePath(entry));
-        return (true, UpdateReasons.None, bytes, payload);
+            if (!await HdiffTool.ApplyAsync(_cfg.ResolveToolsDir(), entry.PredecessorPath, patchPath, outPath, ct)
+                    .ConfigureAwait(false))
+            {
+                Fs.Delete(patchPath);
+                return (false, UpdateReasons.PatchFailed, bytes, payload);
+            }
+
+            if (!string.Equals(
+                    await Hashing.Md5FileAsync(outPath, ct).ConfigureAwait(false),
+                    entry.Target.MD5, StringComparison.OrdinalIgnoreCase))
+            {
+                Fs.Delete(outPath);
+                Fs.Delete(patchPath);
+                return (false, UpdateReasons.PatchFailed, bytes, payload);
+            }
+
+            Fs.Place(outPath, PlacePath(entry));
+            return (true, UpdateReasons.None, bytes, payload);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>
@@ -705,7 +744,7 @@ public sealed class Updater
         PlanEntry entry, HttpFetcher fetcher, string cacheDir, string reason, CancellationToken ct)
     {
         var blob = Path.Combine(cacheDir, entry.Target.MD5);
-        var gate = _blobLocks.GetOrAdd(blob, _ => new SemaphoreSlim(1, 1));
+        var gate = _fileLocks.GetOrAdd(blob, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct).ConfigureAwait(false);
 
         long bytes = 0, payload = 0;
