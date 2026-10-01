@@ -6,15 +6,15 @@
 # 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径）
 $env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
 
-dotnet run -c Release                                        # 全套（本机实测约 42 秒 / 168 条，不含两个重活）
+dotnet run -c Release                                        # 全套（本机实测约 40 秒 / 171 条，不含两个重活）
 dotnet run -c Release Staged                                 # 只跑名字含 "Staged" 的
 dotnet run -c Release StagedApplierTests.Apply_LandsTheStaged # 精确到方法
 ```
 
-> 上面那个 42 秒是**不带**两个重活时的实测（2026-10-01）。带上五版链模拟是 **299 秒**
+> 上面那个 40 秒是**不带**两个重活时的实测（2026-10-01，171 条）。带上一条线的矩阵模拟 + 真实树端到端是 **299 秒**
 > （真 HTTP + 真 hdiffz + 上百 MB 的树）。
 >
-> ⚠ **重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（168 条），只有耗时能看出来 ——
+> ⚠ **重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（171 条），只有耗时能看出来 ——
 > 所以要跑跨版本回归，必须显式设下面那两个变量，否则容易误以为"跑过了"。
 
 - 筛选参数是**子串匹配**（`Type.Method` 的子串），不是通配符。
@@ -22,8 +22,12 @@ dotnet run -c Release StagedApplierTests.Apply_LandsTheStaged # 精确到方法
   - 真实历史版本端到端：`UPDATER_E2E_TREES=<解包目录的父目录>` —— 该目录下要有
     `CoronaLauncher_Setup_3.12.9269.19502`（旧）与 `CoronaLauncher_Setup_3.12.9381.2215`（新）；
     实测：清单 8.1 s / 补丁 35.4 s（新建 480、失败 0）/ 更新 6.8 s（patch 481、内容 4.8 MB、逐字节一致）
-  - 版本矩阵模拟（22 个场景 = 5 版本链上的 S01–S22）：`UPDATER_SIM_OUT=<输出目录>`，并需要该目录下已有
-    `server-summary.json`（由 `_sim/deploy.ps1` 产出）；结果与日志落在该目录的 `logs/<场景>/`
+  - 版本矩阵模拟（22 个场景 = 5 版本链上的 S01–S22）：`UPDATER_SIM_OUT=<线根目录>`，并需要该目录下已有
+    `server-summary.json`（由 `_sim/deploy.ps1 -Line <线名>` 产出）；结果与日志落在该目录的 `logs/<场景>/`。
+    母板 `test/` 里两条线各 5 个版本（版本号线性增大），**共用同一套场景**（阈值按线名自动取），各跑一遍才算覆盖：
+      - `_sim` ← `-Line coronelauncher`（3700~3900 个文件/版）
+      - `_sim-lc` ← `-Line livecontent`（427~509 个文件/版）。S16/S17/S20 在第二条线上会自跳过 ——
+        它们要 `_sim/link-uuids*.ps1` 产出的 linked 清单，那两个脚本尚未参数化到第二条线
 
 ## 为什么自带一个反射跑器（而不是 xUnit runner）
 
@@ -50,7 +54,8 @@ dotnet run -c Release StagedApplierTests.Apply_LandsTheStaged # 精确到方法
 | `ManifestFreshnessTests` | 缓存比树新 / 命中 304 也要自愈；`--verify-unchanged` 真的会逐文件核对 |
 | `PathSafetyTests` | 路径信任边界（逃逸向量表） |
 | `WireAccountingTests` / `LogFormatTests` | 网线字节口径、日志格式契约 |
-| `VersionMatrixSimulation.cs` | 真实 5 版本的 22 个场景（重活，见上） |
+| `PatchPairSharingTests` | 两条条目共享同一个补丁文件：并发相撞不许回落全量、中转文件被别的句柄占住不许抛异常（修复 `9c08f1f` 的回归） |
+| `VersionMatrixSimulation.cs` | 真实 5 版本的 22 个场景（重活，见上；**两条线共用同一套**） |
 
 ## 约定
 

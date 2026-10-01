@@ -1,4 +1,4 @@
-﻿# Ra3.BattleNet.Updater —— 使用说明
+# Ra3.BattleNet.Updater —— 使用说明
 
 > 面向**引用本库的开发者**：怎么接、怎么用、会拿到什么、该怎么处理。
 > 子项目参数细节见同目录下各自的 README：
@@ -501,14 +501,17 @@ $env:UPDATER_E2E_TREES  = "<解包目录的父目录>"
 $env:UPDATER_TEST_TMP   = "<空间充足的临时盘>"
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 
-# 五版链模拟（22 个场景，真 HTTP + 真 hdiffz）：需要 _sim 里已有 server-summary.json
-$env:UPDATER_SIM_OUT = "<_sim 目录>"
+# 五版链模拟（22 个场景，真 HTTP + 真 hdiffz）：需要**该线根目录**里已有 server-summary.json
+# （由 _sim\deploy.ps1 -Line coronelauncher|livecontent 产出）。**一条线一次**，两条线各跑一遍才算覆盖：
+#   _sim（CoronaLauncher）与 _sim-lc（LiveContent）
+$env:UPDATER_SIM_OUT = "<线根目录：_sim 或 _sim-lc>"
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release
 ```
 
-- 全套（不带上面两个重活）：**168 条 / 约 42 秒**（2026-10-01 实测）；带上五版链模拟约 **299 秒**。
-- ⚠ **这两个重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（168），只有耗时能看出来。
+- 全套（不带上面两个重活）：**171 条 / 约 40 秒**（2026-10-01 实测）；带上一条线的矩阵模拟 + 真实树端到端约 **299 秒**。
+- ⚠ **这两个重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（171），只有耗时能看出来。
   跑跨版本回归必须显式设 `UPDATER_SIM_OUT` / `UPDATER_E2E_TREES`，否则会误以为"跑过了"。
+- 矩阵模拟还有一层要记住：它是**按 `UPDATER_SIM_OUT` 指向的那条线**跑的，两条线（`_sim` / `_sim-lc`）各跑一遍才叫覆盖。
 - `UPDATER_ISO_TREES`：GB 级大文件用例（3 个 Windows ISO），与跨版本无关，缺 ISO 时保持跳过。
 
 > 该测试项目自带一个反射跑器（`Tests/Program.cs`）：受限环境里 VSTest 的 testhost 会因

@@ -8,16 +8,46 @@ using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 namespace Ra3.BattleNet.Updater.Tests;
 
 /// <summary>
-/// 5 版本模拟拉取。前置：先用 <c>_sim/deploy.ps1</c> 部署服务端产物（5 版链式清单 +
-/// 内容寻址完整文件 + 保留窗口 N=3 的内容对补丁），然后设置 <c>UPDATER_SIM_OUT=_sim</c> 运行本类。
+/// 5 版本模拟拉取。前置：先用 <c>_sim/deploy.ps1 -Line &lt;线名&gt;</c> 部署服务端产物（5 版链式清单 +
+/// 内容寻址完整文件 + 保留窗口 N=3 的内容对补丁），然后把 <c>UPDATER_SIM_OUT</c> 指到那条线的根目录运行本类。
+///
+/// **两条线**（母板 `test/` 各 5 个版本，版本号线性增大；本类只认"这个 root 下有 5 个版本"）：
+///   - <c>_sim</c>    ← <c>-Line coronelauncher</c>（3700~3900 个受管文件/版，单步变更常达数百）
+///   - <c>_sim-lc</c> ← <c>-Line livecontent</c>（427~509 个/版，单步只变几个到几十个，且多为大文件）
 ///
 /// 每个场景都是一次**真实的**客户端拉取（真 HTTP 服务、真 hdiffz、真字节比对），
-/// 结果 / 日志 / 字节数 / 增量命中率都落到 <c>_sim/logs/&lt;场景&gt;/</c>。
+/// 结果 / 日志 / 字节数 / 增量命中率都落到 <c>&lt;root&gt;/logs/&lt;场景&gt;/</c>。
 /// 未设置环境变量时不做任何事（默认测试套件不跑这个重活）。
 /// </summary>
 public class VersionMatrixSimulation
 {
     private static string Root => Environment.GetEnvironmentVariable("UPDATER_SIM_OUT") ?? string.Empty;
+
+    private static bool? _coronaLine;
+
+    /// <summary>
+    /// 本线是不是 CoronaLauncher 线 —— 从服务端产物自带的版本名单里**自动认**，不需要额外开关。
+    /// 【为什么需要】少数场景的阈值是按 CoronaLauncher 的**数据形态**标的（一版 3700~3900 个文件、
+    /// 单步动辄几百个变更）。LiveContent 线一版只有 400~500 个文件、单步只变几个到几十个：
+    /// 拿绝对值去卡它，会把"正确的小变更"判成红。所以这些地方按线取阈值（见 <see cref="PatchedFloor"/>）。
+    /// 判据放在 <c>server-summary.json</c> 里（deploy 脚本写的版本名），不额外引入环境变量。
+    /// </summary>
+    private static bool CoronaLine
+    {
+        get
+        {
+            if (_coronaLine is null)
+            {
+                var summary = Path.Combine(Root, "server-summary.json");
+                _coronaLine = !File.Exists(summary)
+                    || File.ReadAllText(summary).Contains("CoronaLauncher", StringComparison.OrdinalIgnoreCase);
+            }
+            return _coronaLine.Value;
+        }
+    }
+
+    /// <summary>"应当命中补丁"类断言的下限：CoronaLauncher 线上保持历史值 20，LC 线按它自己的量级取 5。</summary>
+    private static int PatchedFloor => CoronaLine ? 20 : 5;
 
     private static bool NotReady()
     {
@@ -26,6 +56,7 @@ public class VersionMatrixSimulation
             Console.WriteLine("跳过：未设置 UPDATER_SIM_OUT 或服务端产物不存在（先跑 _sim/deploy.ps1）");
             return true;
         }
+        Console.WriteLine($"线：{(CoronaLine ? "coronelauncher" : "livecontent")}（{Root}）");
         return false;
     }
 
@@ -309,7 +340,7 @@ public class VersionMatrixSimulation
         // dotnet/shared/ 并升级了主版本：只有约 30 个文件的 UUID 能延续（"仅内容变动"），
         // 其余 600+ 个是路径与内容同时变化 —— 生成器只能把它们列成"疑似改名"提示人工确认
         // UUID（§5.2 / K1），在此之前它们只能完整下载。这正是 F8 要观测的那类发布。
-        Assert.True(r.Patched >= 20, $"UUID 延续的那批文件应当命中补丁，实得 {r.Patched}");
+        Assert.True(r.Patched >= PatchedFloor, $"UUID 延续的那批文件应当命中补丁，实得 {r.Patched}");
         Assert.True(diff.Clean, diff.Text);
         CleanupClient(client);
     }
@@ -350,7 +381,7 @@ public class VersionMatrixSimulation
 
         Assert.Equal(UpdateOutcome.Updated, r.Outcome);
         Assert.Equal(0, r.FailedCount);
-        Assert.True(r.Patched >= 20, $"保留窗口内的跨版升级应当命中补丁，实得 {r.Patched}");
+        Assert.True(r.Patched >= PatchedFloor, $"保留窗口内的跨版升级应当命中补丁，实得 {r.Patched}");
         Assert.True(diff.Clean, diff.Text);
         CleanupClient(client);
     }
@@ -419,7 +450,9 @@ public class VersionMatrixSimulation
 
         Assert.Equal(UpdateOutcome.Updated, r.Outcome);
         Assert.Equal(0, r.FailedCount);
-        Assert.True(r.Skipped > 3000, $"绝大多数文件应当按磁盘哈希命中而跳过，实得 {r.Skipped}");
+        // 写成"占总数几成"而不是绝对值：绝对值 3000 是按 CoronaLauncher 一版 3935 个文件标的（76%）。
+        // 80% 这条对 CoronaLauncher 比原来更严（3148 > 3000），对 LC 线（509 个/版）才是可判定的。
+        Assert.True(r.Skipped >= r.Total * 4 / 5, $"绝大多数文件应当按磁盘哈希命中而跳过，实得 {r.Skipped}/{r.Total}");
         Assert.True(diff.Clean, diff.Text);
         CleanupClient(client);
     }
@@ -548,7 +581,7 @@ public class VersionMatrixSimulation
         Assert.Equal(0, r.Patched);
         Assert.Equal(0, r.FailedCount);
         // 只有"能定位到本地前身"的文件才会去探测补丁（其余没有前身，直接完整下载）
-        Assert.True(http.NotFound >= 20, $"应当真的探测过补丁并收到 404，实得 {http.NotFound}");
+        Assert.True(http.NotFound >= PatchedFloor, $"应当真的探测过补丁并收到 404，实得 {http.NotFound}");
         Assert.True(diff.Clean, diff.Text);
         CleanupClient(client);
     }
@@ -588,7 +621,9 @@ public class VersionMatrixSimulation
         using var http = new TestHttpServer(ServerDir);
 
         using var cts = new CancellationTokenSource();
-        var progress = new SyncProgress<UpdateProgress>(p => { if (p.Current >= 300) cts.Cancel(); });
+        // 取消点按本轮**待处理数**取比例：写死 300 在一版 3935 个文件的线是"跑到一半"，
+        // 在 LC 线（本轮只有几十个）则永远到不了 —— 那会让"取消"这件事根本没发生，断言变成假绿。
+        var progress = new SyncProgress<UpdateProgress>(p => { if (p.Current >= Math.Max(5, p.Total / 4)) cts.Cancel(); });
         var interrupted = Run(client, http, null, cts.Token, progress);
 
         Assert.NotEqual(UpdateOutcome.Updated, interrupted.Outcome);
@@ -894,7 +929,9 @@ public class VersionMatrixSimulation
             totalBytes, TimeSpan.Zero);
         var extra = "- 四步明细：\n" + string.Join("\n", steps.Select(s => $"  - {s}")) +
                     $"\n- **逐级合计**：{totalBytes:N0} 字节\n" +
-                    "- **对照**：直接 v1→v5 = 312,863,990（S06）；只下变更文件不做差分 = 339,906,059；v5 整包 = 166,806,449";
+                    (CoronaLine
+                        ? "- **对照**：直接 v1→v5 = 312,863,990（S06）；只下变更文件不做差分 = 339,906,059；v5 整包 = 166,806,449"
+                        : "- **对照**：直接 v1→v5 见 S06；\"只下变更文件不做差分\"见各步的基线字节");
         Capture("S18_chained_v1_to_v5", "逐级 v1→v2→v3→v4→v5 是否比直接跳到 v5 更省",
             client, summary, diff.Text, BaselineBytes(1, 5), extra);
 
@@ -928,7 +965,9 @@ public class VersionMatrixSimulation
             client, r, diff.Text, BaselineBytes(4, 5), extra, wire);
 
         Assert.Equal(UpdateOutcome.Updated, r.Outcome);
-        Assert.True(http.CompressedResponses > 100);
+        // 压缩响应数与被压缩的对象数同量级（补丁 + 完整文件）；绝对值 100 是 CoronaLauncher 的量级。
+        Assert.True(http.CompressedResponses >= (r.Full + r.Patched) * 0.8,
+            $"压缩响应数应当覆盖绝大多数内容响应，实得 {http.CompressedResponses}（patch={r.Patched} full={r.Full}）");
         Assert.True(diff.Clean, diff.Text);
         CleanupClient(client);
     }

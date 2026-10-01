@@ -1,4 +1,4 @@
-﻿# RA3BattleNet Updater
+# RA3BattleNet Updater
 
 文件级**增量更新**系统（C# / .NET 10）：服务端只产出**静态文件树**（可整体交给 CDN），
 客户端按内容寻址、只下载变化的部分；拿不到增量时干净回落完整下载。
@@ -52,12 +52,14 @@ dotnet build Ra3.BattleNet.sln -c Release
 
 # 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径）
 $env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
-dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套（约 42 秒 / 168 条）
+dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套（约 40 秒 / 171 条）
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑名字含 Staged 的
 
 # 两个"重活"默认跳过、**未设环境变量时静默跳过但仍计 PASS**（计数不变、只有耗时能看出来）：
-$env:UPDATER_SIM_OUT   = '<_sim 目录>'            # 五版链模拟（22 个场景，约 +4 分钟）
+$env:UPDATER_SIM_OUT   = '<线根目录>'              # 五版链模拟（22 个场景，约 +4 分钟；**一条线一次**）
 $env:UPDATER_E2E_TREES = '<解包目录的父目录>'      # 真实历史版本端到端（需两个指定版本目录）
+# 矩阵模拟两条线共用同一套 22 个场景：先 _sim\deploy.ps1 -Line coronelauncher / livecontent 各部署一份，
+# 再把 UPDATER_SIM_OUT 分别指向 _sim 与 _sim-lc 各跑一遍。
 ```
 
 完整的两版生成 → 发布 → 客户端更新示例见 [`USAGE.md`](USAGE.md) §5。
