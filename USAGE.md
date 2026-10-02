@@ -143,6 +143,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 > 实测同一次真实更新（v4→v5，35 请求）：内容 1.85 MiB、payload 1.86 MiB、**wire 1.89 MiB**。
 
 `Reason` 里几个值得宿主单独认的：`already_running`（同一安装根已有一个会话/落地在跑）、
+`policy`（**工作量保险丝触发** → 交回宿主；**此时本地清单会被作废**，见下）、
 `pending_staged_apply`（有已暂存未落地的更新，却走了就地模式）、
 `staged_plan_stale`（**落地阶段**的一致性自检没过：缓存里的远端清单与计划对不上，说明缓存被替换或损坏了 ——
 不是"远端发了新版本"，那一种不改动任何东西、留到下一次更新）、
@@ -151,6 +152,15 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 `tree_busy`（等不到树静默：宿主 PID 未退出，或**清单里列出的 `.exe`** 仍在树内运行；**一个文件都没动**）、
 `path_escape`（**远端清单、本地清单、或落地计划里出现了逃出安装根的路径 → 整个更新被拒，一个文件都不动**；
 本地清单也算 —— 它同样可能被篡改或从旧备份还原，而它的路径会被当成改名的来源）。
+
+> **交回宿主（`NeedsHostFallback`）之后本地清单会被作废**（`policy` 与失败收敛两条路都是），下一轮改为
+> "没有可信基线 → 逐文件按磁盘哈希核对"。为什么必须这么做：交回宿主意味着"宿主去拿整包覆盖整棵树"，
+> 而本地清单**只有成功才前进** —— 留着它，下一轮算的还是"相对那个旧清单"的差异、恒不缩小，
+> 保险丝于是每轮都撞、清单永远不前进、**客户端永久停更且每轮都走整包**（自锁）。
+> 作废之后：宿主真用整包把树换新了 → 下一轮全命中、直接判已最新并把清单写回（**0 下载**）；
+> 宿主什么也没做 → 下一轮看到的是"磁盘 vs 远端"的**真实**剩余工作量。前提是
+> `AdoptLocalTreeWhenNoBaseline` 保持默认开启。**普通失败（`Failed`）不受影响**：清单照旧保留，
+> 因为那是"续做 + 打补丁"的唯一依据。
 
 ### 2.4 取消与超时
 
@@ -175,7 +185,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `MaxConcurrency` | 4 | 并发**上限**；起始固定 2，全部成功才逐步加，出现失败就回退 |
 | `MinFailuresForHostFallback` | 5 | 失败容忍度下限（`max(该值, ceil(比例 × 待处理文件数))`） |
 | `FailRatioForHostFallback` | 0.10 | 失败容忍度比例 |
-| `FullPackageThresholdFiles` / `...Ratio` | 0 / 0（关） | 可选保险丝：待下载文件数/占比超阈值就交回宿主。**开着它就不要关 `AdoptLocalTreeWhenNoBaseline`**（否则没有本地清单时待下载数 = 全部文件，必然撞阈值） |
+| `FullPackageThresholdFiles` / `...Ratio` | 0 / 0（关） | 可选保险丝：待下载文件数/占比超阈值就交回宿主（`reason=policy`），**并作废本地清单**（下一轮按磁盘重新核对）。**开着它就不要关 `AdoptLocalTreeWhenNoBaseline`**（否则没有本地清单时待下载数 = 全部文件，必然撞阈值；清单一旦作废也就再没有自救的路） |
 | `FullPackageRatioMinFiles` | 50 | 占比判据生效的最小文件数 |
 | `AdoptLocalTreeWhenNoBaseline` | `true` | **没有可信基线**（本地清单不存在或损坏）时，按磁盘哈希逐个核对受管文件，命中的判为「无需更新」；全部命中就直接判「已最新」（带宽 0）。只影响**本次规划**，不落盘、不声称版本。已有可用本地清单时本项不生效 |
 | `LogPath` | `<LocalApplicationData>/updater-logs/<安装根指纹>/update.log` | 日志路径；**故意不放临时目录**（日志是事后要看的东西） |

@@ -828,6 +828,11 @@ public sealed class Updater
         var payload = _fetcher?.PayloadBytes ?? 0;
         // wire = 本进程真正上网的字节（连接层计数，M-1）。做带宽验收看它，别用 payload。
         var wire = _fetcher?.WireBytes ?? 0;
+
+        // 【必须】交回宿主 ⇒ 作废本地清单（理由见 DropBaseline）。写在 R 行之前：
+        // 先把"本轮把身份作废了"这个事实记成一行 C 行，再写这一轮的结论。
+        if (outcome is UpdateOutcome.NeedsHostFallback) DropBaseline(log, reason);
+
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, payload, wire);
 
@@ -841,6 +846,45 @@ public sealed class Updater
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             sw.Elapsed, detailOut, httpVersion, payload, wire,
             _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0);
+    }
+
+    /// <summary>
+    /// **交回宿主时作废本地清单**（AGENT.md §4.4 / §4.5 / §4.10）。
+    ///
+    /// 为什么必须有：`NeedsHostFallback` 的语义是"这一版不归本库管了 —— 宿主去拿整包覆盖整棵树"
+    /// （§4.12）。而本地清单**只在成功时前进**（本轮全成功 / applier 落地成功 / 无基线全命中）。
+    /// 两者叠起来就是一个自锁：宿主用整包把文件换新了、清单却还是旧的 → 下一轮算出的差异是
+    /// **相对那个旧清单**的、**恒不缩小**（版本越往前走越大）→ 保险丝每轮都撞 → 清单永远不前进
+    /// → 客户端被**永久钉在旧版本**上，而且每轮都走整包（实测：同一棵树同一阈值连跑两轮都是 `policy`）。
+    ///
+    /// 作废 = 让下一轮走"没有可信基线"那条路（§4.10）：逐文件按**磁盘哈希**合成基线 ——
+    ///   - 宿主真用整包把树换新了 → 全部命中 → 直接 `UpToDate` 并写入正确清单（自锁解除，0 下载）；
+    ///   - 宿主什么也没做 → 基线变成"磁盘 vs 远端"的**真实**工作量，判定才对得上事实。
+    /// 本地清单是**派生产物**，删掉不需要宿主配合：下一轮要么全命中直接写回，要么补齐差异后再写。
+    ///
+    /// 【注意】这条自救依赖 `AdoptLocalTreeWhenNoBaseline`（默认开）：把它关掉之后，清单一旦作废
+    /// 就再没有任何办法知道树的状态了 —— 这正是 §4.4 那条"开着阈值就不要关它"的另一面。
+    ///
+    /// 【只在这一条路上做】普通失败（网络抖动、个别文件被占用…）**必须保留**清单：它是"续做 + 打补丁"
+    /// 的唯一依据（§4.3① / §4.5），删掉会把这轮白下的字节变成下一轮的整份下载。那类失败也不会自锁：
+    /// 重试要么成功，要么失败数累积过阈值 → 变成 `NeedsHostFallback` → 走到这里作废。
+    ///
+    /// 绝不抛异常（§4.12）：清单删不掉（被占用 / 只读）时只记一行 C 行，下一轮照旧跑。
+    /// </summary>
+    private void DropBaseline(UpdateLog log, string reason)
+    {
+        var path = Path.GetFullPath(_cfg.ResolveLocalManifestPath());
+        try
+        {
+            if (!Fs.Exists(path)) return;
+            Fs.Delete(path);
+            log.Context("baseline", "dropped:" + (reason.Length > 0 ? reason : "unknown"));
+        }
+        catch (Exception ex)
+        {
+            // 只记事实，不改变本轮结论：清单还在，意味着下一轮会拿它继续当基线（和改动前一样）
+            log.Context("baseline", "drop_failed:" + Classify(ex));
+        }
     }
 
     private static void SaveEtag(string etagPath, string? etag)

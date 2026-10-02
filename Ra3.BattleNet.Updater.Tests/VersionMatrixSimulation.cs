@@ -741,17 +741,21 @@ public class VersionMatrixSimulation
         const string name = "S14_workload_fuse";
         Publish(5);
         var client = NewClient(name, 4);
-        var before = TestSupport.Md5File(Path.Combine(client, "manifest.xml"));
+        var localManifest = Path.Combine(client, "manifest.xml");
         using var http = new TestHttpServer(ServerDir);
 
         var r = Run(client, http, cfg => cfg with { FullPackageThresholdFiles = 1 });
-        Capture(name, "运维把保险丝设成「待下载 ≥1 个文件就交回宿主」：应当返回 NeedsHostFallback，且一个文件都不动",
-            client, r, "（不动任何文件）");
+        Capture(name, "运维把保险丝设成「待下载 ≥1 个文件就交回宿主」：应当返回 NeedsHostFallback；树不动，但本地清单作废（下次按磁盘重新核对）",
+            client, r, "（不动任何文件；本地清单已作废）");
 
         Assert.Equal(UpdateOutcome.NeedsHostFallback, r.Outcome);
         Assert.Equal(UpdateReasons.WorkloadTooLarge, r.Reason);
         Assert.Equal(0, r.BytesDownloaded);
-        Assert.Equal(before, TestSupport.Md5File(Path.Combine(client, "manifest.xml")));
+        // ① 树上的字节一个都不许动
+        Assert.True(Compare(4, client).Clean, "交回宿主时不得改动树上的任何字节");
+        // ② 但本地清单**必须作废**（§4.4/§4.5）：宿主会拿整包覆盖整棵树，旧清单不再代表它；
+        //    留着它就会自锁 —— 下一轮算的还是"相对旧清单"的差异，恒不缩小 → 每轮都撞。
+        Assert.False(File.Exists(localManifest), "交回宿主后本地清单必须被作废，否则下一轮会拿旧基线继续撞阈值");
         CleanupClient(client);
     }
 

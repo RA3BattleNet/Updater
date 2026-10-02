@@ -1,15 +1,11 @@
 {
-  "SourcesHash": "4fb84a6adce8c99f773596d5bb93c8ff",
+  "SourcesHash": "20c2b2bd5e98bdd8ebb76b2bc26fe7ff",
   "Rids": [
     "win-x64",
     "win-x86",
     "linux-x64"
   ],
   "Exes": {
-    "linux-x64": {
-      "Name": "Client.Applier",
-      "Bytes": 228349
-    },
     "win-x86": {
       "Name": "Client.Applier.exe",
       "Bytes": 289465
@@ -17,9 +13,13 @@
     "win-x64": {
       "Name": "Client.Applier.exe",
       "Bytes": 318137
+    },
+    "linux-x64": {
+      "Name": "Client.Applier",
+      "Bytes": 228861
     }
   },
   "Sources": 22,
   "PublishCommand": "dotnet publish Ra3.BattleNet.Updater.Client.Applier -c Release -r {rid} --self-contained false -p:PublishSingleFile=true",
-  "UtcTime": "2026-10-01T00:50:32.1113085Z"
+  "UtcTime": "2026-10-02T11:30:21.6191177Z"
 }
