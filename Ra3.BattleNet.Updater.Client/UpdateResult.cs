@@ -45,7 +45,8 @@ public sealed record UpdateResult(
     long PayloadBytes = 0,
     long WireBytes = 0,
     long WireSentBytes = 0,
-    long WireReceivedBytes = 0)
+    long WireReceivedBytes = 0,
+    int Deleted = 0)
 {
     /// <summary>
     /// 宿主是否可以跳过自己原有的更新逻辑。
@@ -82,12 +83,13 @@ public sealed record UpdateResult(
         WireSentBytes,
         WireReceivedBytes,
         Ms = (long)Elapsed.TotalMilliseconds,
+        Deleted,
     });
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
         $"full={Full} fail={FailedCount} bytes={BytesDownloaded} payload={PayloadBytes} wire={WireBytes} " +
-        $"ms={(long)Elapsed.TotalMilliseconds}" +
+        $"ms={(long)Elapsed.TotalMilliseconds} del={Deleted}" +
         (HttpVersion.Length > 0 ? $" http={HttpVersion}" : string.Empty);
 }
 
@@ -121,6 +123,18 @@ public static class UpdateReasons
     public const string IoError = "io_error";
     public const string ManifestUnavailable = "manifest_unavailable";
     public const string LocalCorrupt = "local_corrupt";
+
+    /// <summary>
+    /// **这个文件从远端清单里消失了**（删除，`action=delete`）——见 `DELETE_DESIGN.md`。
+    /// 它是删除唯一正常的理由，单独一个常量是为了让日志里"为什么删"一眼可辨。
+    /// </summary>
+    public const string RemovedFromManifest = "removed_from_manifest";
+
+    /// <summary>
+    /// 待删路径的**父目录链上有 junction / 符号链接** ⇒ 拒绝删除（§4.14 的补集：字符串校验看不见它，
+    /// 而穿透链接会把安装根之外的文件删掉）。跳过并如实归因，不算成功也不算普通 IO 失败。
+    /// </summary>
+    public const string ReparsePoint = "reparse_point";
 
     /// <summary>已有另一个更新实例在运行（AGENT.md §4.9）。</summary>
     public const string AlreadyRunning = "already_running";

@@ -769,13 +769,15 @@ public class StagedApplierTests
         var log = File.ReadAllLines(Path.Combine(client, "UpdaterCache", "update.log"));
         var run = log.Last(l => l.StartsWith("R\t", StringComparison.Ordinal));
         var cols = run.Split('\t');
-        // R | run_id | manifest_hash | total | skip | move | patch | full | fail | bytes | ms | result | requests | payload | wire
-        Assert.Equal(15, cols.Length);
+        // R | run_id | manifest_hash | total | skip | move | patch | full | fail | bytes | ms | result
+        //   | requests | payload | wire | deleted（最后那个是追加在行尾的新列，见 DELETE_DESIGN.md）
+        Assert.Equal(16, cols.Length);
         Assert.Equal("R", cols[0]);
         Assert.Equal(outcome, cols[11]);            // result
         Assert.Equal("0", cols[12]);                // requests
         Assert.Equal("0", cols[13]);                // payload
         Assert.Equal("0", cols[14]);                // wire
+        Assert.Equal("0", cols[15]);                // deleted
     }
 
     /// <summary>

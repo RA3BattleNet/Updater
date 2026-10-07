@@ -107,7 +107,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `Stage` | **阶段标识**（封闭集合、只增不改）：`check` 核对 · `move` 纯改名 · `patch` 打补丁 · `download` 完整下载 · `wait` 等树静默 · `apply` 落地提交 · `done` 收尾 |
 | `Current` / `Total` | 该阶段内的计数（`done` 时报的是这一轮的最终计数） |
 | `FileName` | 当前文件名 / 相对路径（没有具体文件时为空） |
-| `Action` | 该文件被判的**动作**：`skip` / `move` / `patch` / `full`。**动作不放在 `Stage` 里**（历史实现混在一起，宿主只能靠猜）；没有具体文件时为空 |
+| `Action` | 该文件被判的**动作**：`skip` / `move` / `patch` / `full` / `delete`（删除，见 §2.7）。**动作不放在 `Stage` 里**（历史实现混在一起，宿主只能靠猜）；没有具体文件时为空 |
 | `WaitElapsed` / `WaitTimeout` | 仅在 `Stage == wait` 时有值：已等多久 / 时限（`ApplierQuiescenceTimeout`）—— 宿主据此显示"正在等待其他程序退出… 已 Ns" |
 
 - **`Stage = done` 每轮收尾都会报一次**，此后这一轮不再有进度；结论本身走 `UpdateResult`（§2.3）。
@@ -131,7 +131,8 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | 字段 | 说明 |
 |---|---|
 | `Outcome` / `Reason` / `Detail` | 结果类型 / 机器可读原因码 / 人看的细节 |
-| `Total` `Skipped` `Moved` `Patched` `Full` `FailedCount` | 计划与执行计数 |
+| `Total` `Skipped` `Moved` `Patched` `Full` `FailedCount` | 计划与执行计数（`Total` 是**远端条目数**，**不含** `Deleted`） |
+| `Deleted` | 本轮删除（改名进 `UpdaterStage/old/`）的条目数，见 §2.7 |
 | `BytesDownloaded` | **落盘的内容**字节（≈ 这次真正新增了多少内容） |
 | `PayloadBytes` | 从响应正文**读到的**字节（解压后；含清单与重试/续传各段） |
 | `WireBytes` / `WireSentBytes` / `WireReceivedBytes` | **真正上网的字节**（连接层计数，含 TLS/HTTP 头）——**做带宽统计用这一组** |
@@ -207,11 +208,28 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `S` 每轮开始 | `run_id`, `utc_iso` |
 | `C` 每轮上下文 | `run_id`, `name`, `value` —— 只有 applier 写。先是 `root` / `cacheDir` / `manifestFile` 三行（**在该轮 `S` 行之前**：核对"阶段一与落地指向同一处"）；收尾再写 `result` / `reason` / `detail`（**在 `R` 行之后**：会话级失败的原因在这里，是"用户把日志发过来"的入口） |
 | `F` 每文件 | `run_id`,`uuid`,`old_md5`,`old_path`,`new_md5`,`new_path`,`action`,`status`,`reason`,`bytes`,`ms`,`payload` |
-| `R` 每轮收尾 | `run_id`,`remote_manifest_hash`,`total`,`skip`,`move`,`patch`,`full`,`fail`,`bytes`,`ms`,`result`,`requests`,`payload`,`wire` |
+| `R` 每轮收尾 | `run_id`,`remote_manifest_hash`,`total`,`skip`,`move`,`patch`,`full`,`fail`,`bytes`,`ms`,`result`,`requests`,`payload`,`wire`,`deleted` |
 
 - `run_id` = `yyyyMMddTHHmmss-<PID>-<本轮序号>`；applier 那一轮的结尾是 `-apply`（同一个日志里两种轮次都有，按 `run_id` 分组即可）。
-- `action` = `skip` / `move` / `patch` / `full`；`status` = `0` 成功、`1` 未找到、`2` 重试超限、`3` 校验失败、`4` IO/权限/磁盘、`5` 判定需完整包、`9` 其他。
-- `reason`（`action=full` 时最关键、**不允许为空**）= `no_local` / `no_patch` / `patch_failed` / `policy` / `local_corrupt` 等。
+- `action` = `skip` / `move` / `patch` / `full` / `delete`；`status` = `0` 成功、`1` 未找到、`2` 重试超限、`3` 校验失败、`4` IO/权限/磁盘、`5` 判定需完整包、`9` 其他。
+- `reason`（`action=full` 时最关键、**不允许为空**）= `no_local` / `no_patch` / `patch_failed` / `policy` / `local_corrupt` / `removed_from_manifest`（删除的正常归因）/ `reparse_point` 等。
+
+### 2.7 删除：只删"清单差集"，而且是改名
+
+本地清单里登记过、这一版却**从远端清单消失**的受管条目会被删除。要点：
+
+- **只动我们自己登记过的文件**：客户端生成的日志/设置/缓存从来不在清单里，所以永远不在删除视野。
+- **实现是改名**，不是真删：文件进 `<root>/UpdaterStage/old/`（同卷 ⇒ 原子；§12.8 实测"运行中的 exe、
+  只读文件可改名、不可删除"）。它同时是**一代回退材料**，清理窗口止于"下一次更新开始"（§12.7）。
+- **不删的情形**：`Mode=Skip` 的条目、`ExcludedDirs` 下的路径、被 `Move` 消费掉的前身、
+  **没有可信基线时**（本地清单不存在/损坏）一个都不删；路径比较**大小写不敏感**
+  （Windows 上 `data/A/x` 与 `data/a/x` 是同一个文件，按序数比较会误删）。
+- **顺序**：在所有放置/补丁/改名**之后**（补丁前身的路径可能已从远端消失，先删就打不上补丁）。
+- **暂存模式**：阶段一不动树，删除由 applier 在提交阶段最后做（判据同样来自两份清单）。
+- **删除失败**（占用等）：计入失败数、本轮不写本地清单、下一轮重试；"文件已经不在了"算成功（幂等）。
+- **不删目录**（清单里没有目录记录）；空目录留着。
+- **链接穿透护栏**：待删路径的父目录若是 junction / 符号链接，改名会穿透到安装根之外 ——
+  这种路径在字符串上合法（§4.14 看不见），所以命中时**跳过并记 `reason=reparse_point`**（跳过不算失败）。
 - **只允许往行尾追加列、或新增行型；不要改既有列**；分析脚本按 `run_id` 分组（一次进程可能跑多轮）。
 
 ### 2.7 独立进程壳（宿主不是 C# 时）

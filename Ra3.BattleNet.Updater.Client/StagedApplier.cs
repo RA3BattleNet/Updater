@@ -29,6 +29,9 @@ public sealed class StagedApplier
     /// <summary>本轮进度回调。收尾要报一次 <see cref="UpdateStage.Done"/>，而收尾点分散在多个 return 上。</summary>
     private IProgress<UpdateProgress>? _progress;
 
+    /// <summary>删除前的"链接穿透"护栏（按需建；一个进程一轮，缓存只在本轮内有效）。</summary>
+    private ReparseGuard? _reparse;
+
     public StagedApplier(ApplierConfig cfg) => _cfg = cfg;
 
     public UpdateResult Run(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
@@ -221,6 +224,16 @@ public sealed class StagedApplier
                 "有文件落地失败：本地清单未改写（下次运行会按 §12.6 的表续做）",
                 total, skipped, moved, failed);
 
+        // 删除（见 DELETE_DESIGN.md）：**最后**做，而且必须在推进本地清单之前 —— 它失败就不许推进，
+        // 否则那些文件会被新的本地清单"洗掉"，从此再也看不见（永久孤儿）。
+        // 判据与阶段一共用 UpdatePlanner.DeletedFrom；本地清单此刻仍是**旧的那一份**
+        //（暂存模式下阶段一不写它），所以"差集"在这里才有意义。
+        var (deleted, deleteFailed) = DeleteRemoved(root, remote, plan, log, progress, ct);
+        if (deleteFailed > 0)
+            return Finish(log, sw, remoteHash, UpdateOutcome.Failed, UpdateReasons.IoError,
+                $"{deleteFailed} 个文件删除失败（例：被占用）：本地清单未改写，下次运行重试",
+                total, skipped, moved, failed, deleted);
+
         // 全部落地成功 —— 到这里才推进本地清单（§12.5），然后清掉暂存内容与计划。
         // 【必须】不写 ETag：它只服务于"If-None-Match 那次清单请求"，落地阶段既然不联网，
         // 就没有 ETag 可写（缓存里的旧 ETag 属于**上一版**，更不能当成本次的结果写下去）。
@@ -231,7 +244,77 @@ public sealed class StagedApplier
         StageLayout.DeletePlan(root);
 
         return Finish(log, sw, remoteHash, UpdateOutcome.Updated, UpdateReasons.None,
-            $"已落地 {total} 个动作（其中 {skipped} 个本来就已就位）", total, skipped, moved, 0);
+            $"已落地 {total} 个动作（其中 {skipped} 个本来就已就位）" +
+            (deleted > 0 ? $"，并删除 {deleted} 个已从清单消失的文件" : string.Empty),
+            total, skipped, moved, 0, deleted);
+    }
+
+    /// <summary>
+    /// 删除"清单差集"（见 `DELETE_DESIGN.md`）：本地清单登记过、这一版却从远端清单消失的受管条目。
+    ///
+    /// 【必须】判据来自**两份清单**（§4.5 的事实 A/B），不是 `plan.json` —— §12.4：计划只是提示。
+    /// 【必须】与阶段一共用 <see cref="UpdatePlanner.DeletedFrom"/>（两处各写一遍必然漂移）；
+    /// 被 `Move` 消费掉的来源要排除（它已经被改名到新路径了）。
+    /// 【必须】没有可信基线（本地清单不在 / 读不动）时**一个都不删**。
+    /// 【必须】"文件已经不在了"算成功（上一轮删了但没写清单 ⇒ 必须幂等）。
+    /// 实现与就地模式一致：**改名**进 `old/`（改名对占用/只读最宽容，见 §12.8；同卷 ⇒ 原子）。
+    /// </summary>
+    private (int Deleted, int Failed) DeleteRemoved(string root, ManifestModel remote, StagedPlan plan,
+        UpdateLog log, IProgress<UpdateProgress>? progress, CancellationToken ct)
+    {
+        var localPath = Path.GetFullPath(_cfg.ResolveLocalManifestPath());
+        if (!Fs.Exists(localPath)) return (0, 0);
+
+        ManifestModel local;
+        try { local = new ManifestModel(localPath); }
+        catch { return (0, 0); }        // 本地清单坏了 ⇒ 同样不删（没有可信基线）
+
+        var moveSources = plan.Actions
+            .Where(a => a.Kind == StagedActionKind.Move && a.MoveFromRelative is not null)
+            .Select(a => a.MoveFromRelative!)
+            .ToList();
+
+        var deletions = UpdatePlanner.DeletedFrom(remote, local, _cfg.ExcludedDirs, moveSources);
+        if (deletions.Count == 0) return (0, 0);
+
+        int deleted = 0, failed = 0;
+        foreach (var old in deletions)
+        {
+            ct.ThrowIfCancellationRequested();
+            var t0 = Stopwatch.GetTimestamp();
+            var rel = old.RelativePath();
+            var target = UpdatePlanner.Full(root, rel);
+            var status = LogStatus.Ok;
+            var reason = UpdateReasons.RemovedFromManifest;
+
+            try
+            {
+                if (Fs.Exists(target))
+                {
+                    if ((_reparse ??= new ReparseGuard(root)).HasLinkAncestor(target))
+                    {
+                        // 跳过（保护性判定），不是失败：记成失败会让 applier 每轮都拒绝推进本地清单。
+                        reason = UpdateReasons.ReparsePoint;
+                    }
+                    else
+                    {
+                        Fs.Place(target, StageLayout.OldPath(root, rel));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                status = LogStatus.IoError;
+                reason = Classify(ex);
+            }
+
+            if (status == LogStatus.Ok) deleted++; else failed++;
+            log.File(old.UUID.ToString("N"), old.MD5, target, null, null, "delete", status, reason, 0,
+                (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds, 0);
+            progress?.Report(new UpdateProgress(deleted, deletions.Count, old.FileName, UpdateStage.Remove, "delete"));
+        }
+
+        return (deleted, failed);
     }
 
     // ------------------------------------------------------------------ 静默判据
@@ -440,12 +523,13 @@ public sealed class StagedApplier
     }
 
     private UpdateResult Finish(UpdateLog log, Stopwatch sw, string manifestHash, UpdateOutcome outcome,
-        string reason, string detail, int total, int skipped, int moved, int failed)
+        string reason, string detail, int total, int skipped, int moved, int failed, int deleted = 0)
     {
         sw.Stop();
         // 零网络：requests / payload / wire 一律 0（列数与列含义**不变**，见 §4.11 —— 分析脚本按列读）。
+        // deleted 是**追加在行尾**的新列（§4.11 只增列）：本轮删除（改名进 old/）的条目数，见 DELETE_DESIGN.md。
         log.Run(manifestHash, total, skipped, moved, 0, 0, failed, 0, (long)sw.Elapsed.TotalMilliseconds,
-            outcome.ToString(), 0, 0, 0);
+            outcome.ToString(), 0, 0, 0, deleted);
 
         // 【必须】把**结论**也写进日志（用已有的 C 行型，不动任何既有列）。
         // 会话级失败（tree_busy / manifest_unavailable / path_escape / staged_plan_stale /
@@ -458,7 +542,7 @@ public sealed class StagedApplier
         _progress?.Report(new UpdateProgress(total, total, string.Empty, UpdateStage.Done));
 
         return new UpdateResult(outcome, reason, total, skipped, moved, 0, 0, failed, 0, sw.Elapsed, detail,
-            string.Empty, 0, 0, 0, 0);
+            string.Empty, 0, 0, 0, 0, deleted);
     }
 
     /// <summary>日志是 TAB 分列的一行一记录：值里出现 TAB/换行会把列数搞乱，统一压成空格。</summary>
@@ -540,6 +624,9 @@ public sealed class StagedApplier
                      ("--local-manifest", cfg.LocalManifestPath),
                      ("--cache-dir", cfg.CacheDir),
                      ("--log", cfg.LogPath),
+                     // 排除目录随命令行走：applier 要用它算"删除集"（排除目录下的路径绝不删，
+                     // 见 DELETE_DESIGN.md）。旧 applier 忽略它 ⇒ 只是不删，其余照常。
+                     ("--exclude-dirs", cfg.ExcludedDirs.Count > 0 ? string.Join(',', cfg.ExcludedDirs) : null),
                      ("--wait-for-pid", Environment.ProcessId.ToString()),
                      ("--wait-for-name", SelfProcessName()),
                      ("--wait-for-start", SelfStartTicks()),

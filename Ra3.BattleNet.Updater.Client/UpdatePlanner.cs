@@ -29,6 +29,15 @@ public sealed class UpdatePlan
 {
     public required IReadOnlyList<PlanEntry> Entries { get; init; }
 
+    /// <summary>
+    /// **删除集**：本地清单登记过、这一版却从远端清单消失的条目（见 `DELETE_DESIGN.md`）。
+    /// 【必须】它与 <see cref="Entries"/> 分开计数：`Total` 的语义是"远端条目数"（进度分母、
+    /// 失败容忍度基数），把删除混进去会破坏 `Total == Skip + Move + Patch + Full` 这条不变量。
+    /// </summary>
+    public IReadOnlyList<ManifestFile> Deletions { get; init; } = [];
+
+    public int Deleted => Deletions.Count;
+
     public int Total => Entries.Count;
 
     /// <summary>需要处理的文件数（进度条分母，AGENT.md §4.7）。</summary>
@@ -135,16 +144,64 @@ public static class UpdatePlanner
             }
         }
 
+        var moveSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var target in unmatched)
         {
             var targetPath = Full(root, target.RelativePath());
             if (freeContent.Remove(target.MD5, out var same))
+            {
+                moveSources.Add(same.RelativePath());   // 已被改名到别处：不能同时又当删除对象
                 entries.Add(new PlanEntry(PlanAction.Move, target, targetPath, same, Full(root, same.RelativePath()), same.MD5));
+            }
             else
                 entries.Add(new PlanEntry(PlanAction.Full, target, targetPath, null, null, null));
         }
 
-        return new UpdatePlan { Entries = entries };
+        return new UpdatePlan
+        {
+            Entries = entries,
+            Deletions = DeletedFrom(remote, local, cfg.ExcludedDirs, moveSources),
+        };
+    }
+
+    /// <summary>
+    /// **删除集**（见 `DELETE_DESIGN.md`）：本地清单里登记过、这一版却从远端清单**消失**的受管条目。
+    ///
+    /// 为什么不是"按远端清单对整棵树做反向布尔删除"：安装根里必然有客户端自己生成的非追踪文件
+    /// （日志、设置、缓存…），反向布尔要求把它们逐个列白名单，漏一个就是删用户文件。
+    /// 差集法只动"我们自己登记过的东西"。
+    ///
+    /// 【必须】路径比较**大小写不敏感**：Windows 上 `data/Ra3BattleNet/…` 与 `data/Ra3battlenet/…`
+    /// 是同一个文件（LiveContent 线 v2→v3 实测有 21 对这样的改名）。按序数比较会把它判成"消失"从而误删。
+    /// 【必须】三条排除：`Mode=Skip` 的本地条目（清单登记但不受管）、排除目录下的路径、
+    /// 以及已经被 `Move` 消费掉的前身（它已被改名到别处）。
+    /// 【必须】只从**真实的本地清单**算：合成基线（§4.10）里只有远端命中的条目 ⇒ 差集恒为空；
+    /// `local` 为 null（没有可信基线）时直接不删 —— 这是"不删"的最强保证，不依赖巧合。
+    ///
+    /// 阶段一与 applier 共用这一份实现（两处各写一遍必然漂移）。
+    /// </summary>
+    public static IReadOnlyList<ManifestFile> DeletedFrom(
+        ManifestModel remote, ManifestModel? local, IReadOnlyList<string>? excludedDirs,
+        IReadOnlyCollection<string>? moveSources = null)
+    {
+        if (local is null) return [];
+
+        var excluded = ExcludedNames(excludedDirs);
+        var remotePaths = new HashSet<string>(
+            remote.Manifest.Files.Select(f => f.RelativePath()), StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<ManifestFile>();
+        foreach (var f in local.Manifest.Files)
+        {
+            if (f.Mode == FileModeEnum.Skip) continue;
+            var rel = f.RelativePath();
+            if (IsExcluded(rel, excluded)) continue;
+            if (remotePaths.Contains(rel)) continue;
+            if (moveSources is not null && moveSources.Contains(rel)) continue;
+            result.Add(f);
+        }
+
+        return result;
     }
 
     public static string Full(string root, string relative) =>
@@ -167,10 +224,18 @@ public static class UpdatePlanner
     }
 
     /// <summary>不受管目录（顶层目录名，大小写不敏感）+ 库自己的工作目录（§12.3）。</summary>
-    private static HashSet<string> Excluded(UpdateConfig cfg)
+    private static HashSet<string> Excluded(UpdateConfig cfg) => ExcludedNames(cfg.ExcludedDirs);
+
+    /// <summary>
+    /// 排除目录名集合。**始终**把暂存区算进去 —— 它是库自己的工作目录：即便某个 manifest 误列了它、
+    /// 或它某天出现在本地清单里，也绝不受管、**绝不删除**（§12.3）。
+    /// 阶段一与 applier 共用这一份：applier 的排除清单来自 `ApplierConfig.ExcludedDirs`（命令行传入）。
+    /// </summary>
+    internal static HashSet<string> ExcludedNames(IReadOnlyList<string>? dirs)
     {
-        var excluded = new HashSet<string>(cfg.ExcludedDirs.Select(Normalize), StringComparer.OrdinalIgnoreCase);
-        // 暂存区是库自己的工作目录：即便某个 manifest 误列了它，也绝不受管。
+        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (dirs is not null)
+            foreach (var d in dirs) excluded.Add(Normalize(d));
         excluded.Add(Normalize(StageLayout.DirName));
         return excluded;
     }

@@ -41,6 +41,14 @@ public sealed record ApplierConfig
     public string? LogPath { get; init; }
 
     /// <summary>
+    /// 不受管目录（顶层目录名，大小写不敏感）。**必须与阶段一的 `UpdateConfig.ExcludedDirs` 一致** ——
+    /// applier 用它计算"删除集"（见 `DELETE_DESIGN.md`）：排除目录下的路径即便出现在旧清单里也**绝不删**。
+    /// 由 <see cref="StagedApplier.BuildApplyCommand"/> 自动带上；旧 applier（`UnknownArgPolicy.Ignore`）
+    /// 会忽略这个参数，于是它只是"不删"而已，其余照常落地。
+    /// </summary>
+    public IReadOnlyList<string> ExcludedDirs { get; init; } = [];
+
+    /// <summary>
     /// 日志超过该字节数就在下一次运行时轮转成 <c>update.log.1</c>（只留一代）。
     /// 默认 8 MB；0 = 不轮转。见 AGENT.md §4.11。
     /// </summary>
@@ -124,6 +132,7 @@ public sealed record ApplierConfig
         var argv = args as string[] ?? args.ToArray();
 
         string? root = null, manifestFile = null, localManifest = null, cacheDir = null, log = null;
+        string? excludeDirs = null;
         int? waitForPid = null;
         string? waitForName = null;
         long? waitForStart = null;
@@ -141,6 +150,8 @@ public sealed record ApplierConfig
                 case "--local-manifest": localManifest = Next(argv, ref i); break;
                 case "--cache-dir": cacheDir = Next(argv, ref i); break;
                 case "--log": log = Next(argv, ref i); break;
+                // 逗号分隔；与阶段一的 ExcludedDirs 同源（删除集要用它，见 DELETE_DESIGN.md）
+                case "--exclude-dirs": excludeDirs = Next(argv, ref i); break;
                 case "--wait-for-pid": waitForPid = int.Parse(Next(argv, ref i)); break;
                 case "--wait-for-name": waitForName = Next(argv, ref i); break;
                 case "--wait-for-start": waitForStart = long.Parse(Next(argv, ref i)); break;
@@ -170,6 +181,9 @@ public sealed record ApplierConfig
             LocalManifestPath = localManifest is null ? null : Path.GetFullPath(localManifest),
             CacheDir = cacheDir is null ? null : Path.GetFullPath(cacheDir),
             LogPath = log is null ? null : Path.GetFullPath(log),
+            ExcludedDirs = excludeDirs is null
+                ? []
+                : excludeDirs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             WaitForProcessId = waitForPid,
             WaitForProcessName = waitForName,
             WaitForProcessStartTicks = waitForStart,

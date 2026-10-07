@@ -61,9 +61,9 @@ public class LogFormatTests
         Assert.Equal(2, fLines.Count);
         Assert.Single(rLines);
 
-        // 列数写死：F=13 列、R=15 列（requests / payload / wire 都是追加在行尾的列）
+        // 列数写死：F=13 列、R=16 列（requests / payload / wire / deleted 都是追加在行尾的列）
         Assert.All(fLines, l => Assert.Equal(13, l.Split('\t').Length));
-        Assert.Equal(15, rLines[0].Split('\t').Length);
+        Assert.Equal(16, rLines[0].Split('\t').Length);
 
         // action / status 是封闭集合
         var actions = new[] { "skip", "move", "patch", "full" };

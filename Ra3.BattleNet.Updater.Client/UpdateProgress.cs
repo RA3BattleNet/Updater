@@ -54,6 +54,12 @@ public static class UpdateStage
     /// <summary>暂存更新的落地阶段：逐个提交（**仅 applier**，§12.5）。</summary>
     public const string Apply = "apply";
 
+    /// <summary>
+    /// 删除阶段：把"清单差集"里的文件改名进 `UpdaterStage/old/`（见 `DELETE_DESIGN.md`）。
+    /// 它在所有放置/补丁/改名之后（两边都可能有），所以必须是**可分辨的阶段**。
+    /// </summary>
+    public const string Remove = "remove";
+
     /// <summary>本轮收尾（两边都报一次）：此后这一轮不再有进度。</summary>
     public const string Done = "done";
 }

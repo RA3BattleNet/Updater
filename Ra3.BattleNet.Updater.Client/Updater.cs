@@ -38,6 +38,9 @@ public sealed class Updater
     /// <summary>缺工具导致本轮降级时，写给 <c>UpdateResult.Detail</c> 的一句话（见 Finish）。</summary>
     private string? _patchToolNote;
 
+    /// <summary>删除前的"链接穿透"护栏（按需建；一个会话一个实例，缓存只在本次会话内有效）。</summary>
+    private ReparseGuard? _reparse;
+
     /// <summary>
     /// 同一进程里的第几轮更新。一次进程可能跑多轮（用户取消后重跑、宿主反复调用），
     /// 它们共用一个 update.log；run_id 若只到秒 + PID，同秒内的两轮会撞成同一个 id，
@@ -124,10 +127,10 @@ public sealed class Updater
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.PendingStagedApply,
                 $"检测到已暂存但未落地的更新（{StageLayout.DirName}/）：请先让宿主退出以完成落地，或删除该目录后重试");
 
-        // 暂存模式：**没有待提交计划时**，本轮开始前把上一轮的备份清掉
-        //（§12.7：回退窗口止于"下一次更新开始"）。有待提交计划时不清 ——
-        // 那份备份仍是它的回退材料，交给 applier 在落地时清。
-        if (staged && !pendingStagedPlan)
+        // 本轮开始前把上一轮的备份清掉（§12.7：回退窗口止于"下一次更新开始"）。
+        // 【暂存模式】存在待提交计划时不清 —— 那份备份仍是它的回退材料，交给 applier 在落地时清。
+        // 【就地模式】总是清：删除（见 DELETE_DESIGN.md）也把文件放进 old/，同样只保留一轮。
+        if (!staged || !pendingStagedPlan)
             StageLayout.ClearOld(_cfg.RootPath);
 
         var etagPath = Path.Combine(cacheDir, "manifest.etag");
@@ -448,6 +451,13 @@ public sealed class Updater
                 : $"超出整体时限（{_cfg.SessionTimeout}）";
             return Finish(log, tally, sw, UpdateOutcome.Failed, UpdateReasons.IoError, detail);
         }
+
+        // 删除（DELETE_DESIGN.md）：**必须在所有放置/补丁/改名之后**，且只在其它条目全成功时做。
+        // 反例是真实存在的：补丁前身的路径可能已从远端清单消失 —— 那条路径是删除对象，
+        // 同时又是补丁的**来源**，先删就打不上补丁了。
+        // 【暂存模式不做】阶段一一个字节都不许动树（§12.2）；删除交给 applier 在提交阶段最后执行。
+        if (tally.Fail == 0 && !staged && plan.Deletions.Count > 0)
+            DeleteRemoved(plan.Deletions, tally, log, progress);
 
         if (tally.Fail == 0 && staged)
         {
@@ -834,7 +844,8 @@ public sealed class Updater
         if (outcome is UpdateOutcome.NeedsHostFallback) DropBaseline(log, reason);
 
         log.Run(t.ManifestHash, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
-            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, payload, wire);
+            (long)sw.Elapsed.TotalMilliseconds, outcome.ToString(), _fetcher?.Requests ?? 0, payload, wire,
+            t.Deleted);
 
         // 成功路径本来 Detail 为空；缺补丁工具导致降级时在这里补一句，
         // 让宿主/壳（`--json`）能立刻看出"这轮为什么全在整包下载"。
@@ -845,7 +856,7 @@ public sealed class Updater
 
         return new UpdateResult(outcome, reason, t.Total, t.Skip, t.Move, t.Patch, t.Full, t.Fail, t.Bytes,
             sw.Elapsed, detailOut, httpVersion, payload, wire,
-            _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0);
+            _fetcher?.WireSentBytes ?? 0, _fetcher?.WireReceivedBytes ?? 0, t.Deleted);
     }
 
     /// <summary>
@@ -884,6 +895,70 @@ public sealed class Updater
         {
             // 只记事实，不改变本轮结论：清单还在，意味着下一轮会拿它继续当基线（和改动前一样）
             log.Context("baseline", "drop_failed:" + Classify(ex));
+        }
+    }
+
+    /// <summary>
+    /// 就地模式的删除：把"清单差集"（<see cref="UpdatePlan.Deletions"/>，见 `DELETE_DESIGN.md`）里的文件
+    /// **改名**进 `UpdaterStage/old/`。
+    ///
+    /// 为什么是改名而不是真删：§12.8 实测"运行中的 exe/dll、只读文件：**可改名、不可覆盖、不可删除**"，
+    /// 删除对这两类都会失败；改名还是原子的，并且天然就是一代回退材料。
+    /// 【必须】目标必须**同卷** ⇒ 只能放进安装根下的 `old/`，不能放缓存或临时目录（跨卷会退化成复制，
+    /// 而复制对占用文件同样会失败 —— 等于把改名的好处全扔掉）。
+    /// 【必须】路径逃逸（`..` / 绝对路径 / 盘符）已由 §4.14 在整轮开始前拦掉；这里补上它**看不见**的
+    /// 另一半：父目录链上的 junction / 符号链接（字符串上完全合法，却指到安装根之外）。
+    /// 【必须】"文件已经不在了"算**成功** —— 上一轮删了但没写清单时，重跑必须幂等。
+    /// 删除失败计入失败数 ⇒ 本轮不写本地清单 ⇒ 下一轮重试（与其它条目同一条收敛路径）。
+    /// </summary>
+    private void DeleteRemoved(IReadOnlyList<ManifestFile> deletions, Tally tally,
+        UpdateLog log, IProgress<UpdateProgress>? progress)
+    {
+        var root = Path.GetFullPath(_cfg.RootPath);
+        var done = 0;
+
+        foreach (var old in deletions)
+        {
+            var t0 = Stopwatch.GetTimestamp();
+            var rel = old.RelativePath();
+            var target = UpdatePlanner.Full(root, rel);
+            var status = LogStatus.Ok;
+            var reason = UpdateReasons.RemovedFromManifest;
+
+            try
+            {
+                if (Fs.Exists(target))
+                {
+                    if ((_reparse ??= new ReparseGuard(_cfg.RootPath)).HasLinkAncestor(target))
+                    {
+                        // **跳过**，不是失败：这是一条保护性判定。记成失败会让本轮永远不写清单
+                        //（每轮都失败 → 永久不推进），把"不删"这件事变成"整个更新卡住"。
+                        // 与 full/no_patch 同款：status=Ok + 如实归因。
+                        reason = UpdateReasons.ReparsePoint;
+                    }
+                    else
+                    {
+                        Fs.Place(target, StageLayout.OldPath(_cfg.RootPath, rel));
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                status = LogStatus.IoError;
+                reason = Classify(ex);
+            }
+
+            tally.Deleted++;
+            if (status != LogStatus.Ok)
+            {
+                tally.DeleteFailed++;
+                Interlocked.Increment(ref tally.Fail);
+            }
+
+            log.File(old.UUID.ToString("N"), old.MD5, target, null, null, "delete", status, reason, 0,
+                (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+            progress?.Report(new UpdateProgress(Interlocked.Increment(ref done), deletions.Count,
+                old.FileName, UpdateStage.Remove, "delete"));
         }
     }
 
@@ -936,6 +1011,13 @@ public sealed class Updater
         public int Fail;
         public long Bytes;
         public long Payload;
+
+        /// <summary>已处理的删除条目数（见 DELETE_DESIGN.md）。**不进 Total**：口径不同。</summary>
+        public int Deleted;
+
+        /// <summary>其中失败的（已经计入 <see cref="Fail"/>，这里只为诊断）。</summary>
+        public int DeleteFailed;
+
         public string ManifestHash = string.Empty;
     }
 }
