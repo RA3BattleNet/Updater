@@ -925,6 +925,7 @@ public sealed class Updater
             var status = LogStatus.Ok;
             var reason = UpdateReasons.RemovedFromManifest;
 
+            var moved = false;
             try
             {
                 if (Fs.Exists(target))
@@ -939,6 +940,7 @@ public sealed class Updater
                     else
                     {
                         Fs.Place(target, StageLayout.OldPath(_cfg.RootPath, rel));
+                        moved = true;
                     }
                 }
             }
@@ -948,7 +950,9 @@ public sealed class Updater
                 reason = Classify(ex);
             }
 
-            tally.Deleted++;
+            // Deleted 只计**实际改名进 old/ 的**：链接跳过、以及"上一轮已经删掉了"都不算
+            //（否则宿主看到的删除数会虚高；那两种情形在 F 行的 reason 里看得到）。
+            if (moved) tally.Deleted++;
             if (status != LogStatus.Ok)
             {
                 tally.DeleteFailed++;

@@ -20,7 +20,11 @@ internal sealed class ReparseGuard
     public ReparseGuard(string rootPath) =>
         _root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar);
 
-    /// <summary>父目录链上是否存在 junction / 符号链接。查不出来（目录不存在等）当"不是"。</summary>
+    /// <summary>
+    /// 父目录链上是否存在 junction / 符号链接。查不出来（目录不存在等）当"不是"。
+    /// 【必须】查属性也要走 <see cref="Fs.P"/>（长路径前缀）：深层目录很容易越过 MAX_PATH，
+    /// 不带前缀的 `File.GetAttributes` 会抛异常 → 被当成"不是链接" → 护栏在那条路上**静默失效**。
+    /// </summary>
     public bool HasLinkAncestor(string filePath)
     {
         for (var dir = Path.GetDirectoryName(filePath); dir is not null && dir.Length > _root.Length;
@@ -31,7 +35,7 @@ internal sealed class ReparseGuard
             _checked.Add(dir);
 
             bool isLink;
-            try { isLink = (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0; }
+            try { isLink = (File.GetAttributes(Fs.P(dir)) & FileAttributes.ReparsePoint) != 0; }
             catch { isLink = false; }
             if (isLink) { _hit.Add(dir); return true; }
         }

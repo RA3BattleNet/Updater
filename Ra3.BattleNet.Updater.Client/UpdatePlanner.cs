@@ -78,6 +78,9 @@ public static class UpdatePlanner
         var entries = new List<PlanEntry>(remote.Manifest.Files.Count);
         var unmatched = new List<ManifestFile>();
         var predecessorPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 本轮**已被别处消费掉**的本地路径（改名 / 内容索引 Move 的来源）：
+        // 它们不该再进删除集 —— 文件已经被搬到新路径了，再"删"一次是空操作，只会多写一行误导性的 delete。
+        var moveSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 第一遍：**只按 UUID 认身份**（AGENT.md §3.4）。
         foreach (var target in remote.Manifest.Files)
@@ -112,6 +115,7 @@ public static class UpdatePlanner
                 var action = string.Equals(oldRel, targetRel, StringComparison.OrdinalIgnoreCase)
                     ? PlanAction.Skip
                     : PlanAction.Move;
+                if (action == PlanAction.Move) moveSources.Add(oldRel);   // 旧路径将被改名搬走
                 entries.Add(new PlanEntry(action, target, targetPath, old, oldPath, old.MD5));
             }
             else
@@ -144,13 +148,12 @@ public static class UpdatePlanner
             }
         }
 
-        var moveSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var target in unmatched)
         {
             var targetPath = Full(root, target.RelativePath());
             if (freeContent.Remove(target.MD5, out var same))
             {
-                moveSources.Add(same.RelativePath());   // 已被改名到别处：不能同时又当删除对象
+                moveSources.Add(same.RelativePath());   // 内容索引 Move 的来源：同样已被搬走
                 entries.Add(new PlanEntry(PlanAction.Move, target, targetPath, same, Full(root, same.RelativePath()), same.MD5));
             }
             else

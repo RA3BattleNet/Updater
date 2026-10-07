@@ -273,6 +273,52 @@ public class DeleteRemovedFilesTests
                                   && l.Contains("\tdelete\t") && l.Contains(UpdateReasons.ReparsePoint));
     }
 
+    /// <summary>
+    /// **被改名搬走的前身不是删除对象**。真实树实测过：CL v4→v5 有一处 UUID 延续的纯改名（`Moved=1`），
+    /// 如果不排除它，日志里会多出一行 `delete`（文件其实已经被搬到新路径了，那一行是空操作）——
+    /// 实测口径：期望删 463、实际 462，差的就是它。结果一直是对的，但日志会误导排查。
+    /// </summary>
+    [Fact]
+    public void RenamedFile_DoesNotAlsoEmitADeleteRow()
+    {
+        using var tmp = new TempDir();
+        var v1 = tmp.Sub("v1");
+        var v2 = tmp.Sub("v2");
+        TestSupport.WriteTree(v1, ("data/old-name.txt", "SAME"));
+        TestSupport.WriteTree(v2, ("data/new-name.txt", "SAME"));   // 内容不变、只有路径变（UUID 延续）
+
+        var m1 = Path.Combine(tmp.Path, "v1.xml");
+        ManifestGenerator.Generate(v1, null, []).Manifest.SaveToXml(m1);
+        var m2 = Path.Combine(tmp.Path, "v2.xml");
+        ManifestGenerator.Generate(v2, m1, [], oldRoot: v1).Manifest.SaveToXml(m2);
+
+        var server = tmp.Sub("server");
+        PatchGenerator.Generate(m2, v2, [new Baseline(m1, v1)], server, minFileSize: 0);
+        File.Copy(m2, Path.Combine(server, "manifest.xml"), overwrite: true);
+
+        var client = tmp.Sub("client");
+        TestSupport.CopyTree(v1, client);
+        File.Copy(m1, Path.Combine(client, "manifest.xml"), overwrite: true);
+
+        using var http = new TestHttpServer(server);
+        var cfg = new UpdateConfig
+        {
+            RootPath = client,
+            CacheDir = TestSupport.TestCacheDir(client),
+            ManifestUrl = http.BaseUrl + "manifest.xml",
+        };
+
+        var r = new ClientUpdater(cfg).Run();
+
+        Assert.Equal(UpdateOutcome.Updated, r.Outcome);
+        Assert.Equal(1, r.Moved);
+        Assert.Equal(0, r.Deleted);
+        Assert.True(File.Exists(P(client, "data/new-name.txt")));
+        Assert.False(File.Exists(P(client, "data/old-name.txt")));
+        var log = File.ReadAllLines(Path.Combine(TestSupport.TestCacheDir(client), "update.log"));
+        Assert.DoesNotContain(log, l => l.StartsWith("F\t", StringComparison.Ordinal) && l.Contains("\tdelete\t"));
+    }
+
     /// <summary>建目录 junction（`mklink /J` 不需要管理员权限）。失败返回 false（调用方跳过）。</summary>
     private static bool TryJunction(string linkPath, string targetPath)
     {

@@ -287,6 +287,7 @@ public sealed class StagedApplier
             var status = LogStatus.Ok;
             var reason = UpdateReasons.RemovedFromManifest;
 
+            var moved = false;
             try
             {
                 if (Fs.Exists(target))
@@ -299,6 +300,7 @@ public sealed class StagedApplier
                     else
                     {
                         Fs.Place(target, StageLayout.OldPath(root, rel));
+                        moved = true;
                     }
                 }
             }
@@ -308,7 +310,9 @@ public sealed class StagedApplier
                 reason = Classify(ex);
             }
 
-            if (status == LogStatus.Ok) deleted++; else failed++;
+            // 只计**实际改名进 old/ 的**（与就地模式同一口径）：链接跳过与"已经删掉了"都不算
+            if (moved) deleted++;
+            if (status != LogStatus.Ok) failed++;
             log.File(old.UUID.ToString("N"), old.MD5, target, null, null, "delete", status, reason, 0,
                 (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds, 0);
             progress?.Report(new UpdateProgress(deleted, deletions.Count, old.FileName, UpdateStage.Remove, "delete"));
