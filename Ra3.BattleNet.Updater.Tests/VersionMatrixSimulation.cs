@@ -8,12 +8,13 @@ using ClientUpdater = Ra3.BattleNet.Updater.Client.Updater;
 namespace Ra3.BattleNet.Updater.Tests;
 
 /// <summary>
-/// 5 版本模拟拉取。前置：先用 <c>_sim/deploy.ps1 -Line &lt;线名&gt;</c> 部署服务端产物（5 版链式清单 +
-/// 内容寻址完整文件 + 保留窗口 N=3 的内容对补丁），然后把 <c>UPDATER_SIM_OUT</c> 指到那条线的根目录运行本类。
+/// 5 版本模拟拉取。前置：把 <c>UPDATER_SIM_OUT</c> 指到一份**按约定准备好的线根目录**
+/// （布局见 `Tests/README.md`：<c>versions/v1..v5</c> + <c>manifests/v1..v5.xml</c> +
+/// 发布好的 <c>server/</c> + <c>server-summary.json</c>），本类只认"这个 root 下有 5 个版本"。
 ///
-/// **两条线**（母板 `test/` 各 5 个版本，版本号线性增大；本类只认"这个 root 下有 5 个版本"）：
-///   - <c>_sim</c>    ← <c>-Line coronelauncher</c>（3700~3900 个受管文件/版，单步变更常达数百）
-///   - <c>_sim-lc</c> ← <c>-Line livecontent</c>（427~509 个/版，单步只变几个到几十个，且多为大文件）
+/// **两条线**都能跑（场景共用，阈值按线自动取）：
+///   - 大线：3700~3900 个受管文件/版，单步变更常达数百
+///   - 小线：427~509 个/版，单步只变几个到几十个，且多为大文件
 ///
 /// 每个场景都是一次**真实的**客户端拉取（真 HTTP 服务、真 hdiffz、真字节比对），
 /// 结果 / 日志 / 字节数 / 增量命中率都落到 <c>&lt;root&gt;/logs/&lt;场景&gt;/</c>。
@@ -53,7 +54,7 @@ public class VersionMatrixSimulation
     {
         if (Root.Length == 0 || !File.Exists(Path.Combine(Root, "server-summary.json")))
         {
-            Console.WriteLine("跳过：未设置 UPDATER_SIM_OUT 或服务端产物不存在（先跑 _sim/deploy.ps1）");
+            Console.WriteLine("跳过：未设置 UPDATER_SIM_OUT，或线根目录里没有 server-summary.json（布局见 Tests/README）");
             return true;
         }
         Console.WriteLine($"线：{(CoronaLine ? "coronelauncher" : "livecontent")}（{Root}）");
@@ -831,7 +832,7 @@ public class VersionMatrixSimulation
         var pairFile = Path.Combine(ManifestsDir, "v5-linked-pairs.json");
         if (!File.Exists(linked) || !File.Exists(pairFile))
         {
-            Console.WriteLine("跳过：没有 v5-linked.xml（先跑 _sim/link-uuids.ps1）");
+            Console.WriteLine("跳过：manifests/ 里没有 v5-linked.xml（需手工关联过的清单）");
             return;
         }
 
@@ -873,7 +874,7 @@ public class VersionMatrixSimulation
         var pairFile = Path.Combine(ManifestsDir, "v5-linked-full-pairs.json");
         if (!File.Exists(linked) || !File.Exists(pairFile))
         {
-            Console.WriteLine("跳过：没有 v5-linked-full.xml（先跑 _sim/link-uuids-full.ps1）");
+            Console.WriteLine("跳过：manifests/ 里没有 v5-linked-full.xml（需手工关联过的清单）");
             return;
         }
 

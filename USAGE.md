@@ -41,13 +41,13 @@
 
 ### 0.2 现状与已知限制（**接入前必看**）
 
-**已验证**：协议与清单格式、增量 / 补丁 / 纯改名 / 回落的正确性、中断续做、
-暂存更新的两个阶段（含 Cloudflare R2 真机端到端）、宿主身份判定、路径信任边界。
+**已验证**：协议与清单格式、增量 / 补丁 / 纯改名 / **删除** / 回落的正确性、中断续做、
+暂存更新的两个阶段（含 Cloudflare R2 真机端到端）、宿主身份判定、路径信任边界、**AOT / 裁剪兼容**。
 
 | 项 | 现状 |
 |---|---|
-| **真宿主集成** | **未验证**。库与壳各自都测过，但"宿主退出前挂 applier → 退出 → 落地 → 拉起宿主"整条链路只有文档 + 单元级测试；接入方必须自己在真宿主上跑一遍 |
-| **删除集**（上游删掉的文件） | **不做**。上游删掉的文件会**留在盘上**；若残留的旧 dll/exe 影响加载，需要定期整包重装或另行实现 |
+| **真宿主集成** | 已在 RA3BattleNet Desktop 的自更新链路上接入（含 Cloudflare R2 真机端到端），但那条链路的回归**不在本仓库的测试里**；新接入方仍要在自己的宿主上完整跑一遍 |
+| **删除集**（上游删掉的文件） | **已实现**：只删"本地清单登记过、这一版却从远端清单消失"的受管条目，实现是**改名**进 `UpdaterStage/old/`（可回退一代）。不删目录、没有开关与阈值 —— 见 §2.7 |
 | 非 Windows | **未验证**。改名提交的语义只在 NTFS 上量过（`linux-x64` 工具随包，但整套没在 Linux/macOS 上跑过） |
 | 提权 | 库**自己绝不提权、不弹 UAC**。宿主提权则整条链路都提权；宿主不提权则**安装根必须对当前用户可写**（阶段一就要写 `UpdaterStage/`） |
 | CI | **不做**，回归靠人工跑全套（§6） |
@@ -104,7 +104,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 
 | 字段 | 含义 |
 |---|---|
-| `Stage` | **阶段标识**（封闭集合、只增不改）：`check` 核对 · `move` 纯改名 · `patch` 打补丁 · `download` 完整下载 · `wait` 等树静默 · `apply` 落地提交 · `done` 收尾 |
+| `Stage` | **阶段标识**（封闭集合、只增不改）：`check` 核对 · `move` 纯改名 · `patch` 打补丁 · `download` 完整下载 · `remove` 删除（§2.7） · `wait` 等树静默 · `apply` 落地提交 · `done` 收尾 |
 | `Current` / `Total` | 该阶段内的计数（`done` 时报的是这一轮的最终计数） |
 | `FileName` | 当前文件名 / 相对路径（没有具体文件时为空） |
 | `Action` | 该文件被判的**动作**：`skip` / `move` / `patch` / `full` / `delete`（删除，见 §2.7）。**动作不放在 `Stage` 里**（历史实现混在一起，宿主只能靠猜）；没有具体文件时为空 |
@@ -355,7 +355,7 @@ if (r.PendingRestart)
    所以不作为解决手段。顺带更正一个流传过的说法：`UseShellExecute = true` 与 `ArgumentList`
    在 .NET 10 上**可以共存**（本项目实测过：不抛异常、参数生效、退出码 0），
    "不能用 ArgumentList、得自己拼命令行"是错的；真正的代价是它**解决不了**这个问题。
-5. **落地要树静默**：宿主必须**真的退出**（applier 等的是宿主 PID），并且**清单里列出的 `.exe`** 不能在树内还在跑。扫描范围就是这两条 —— 树内**不被 manifest 管理**的 exe（自备工具、临时进程、WebView2 子进程等）**不会**被判为繁忙，它们的影响是"占着文件导致改名失败"，那时返回 `io_error` 而非 `tree_busy`。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。（判据原文见 `AGENT.md` §12.5）
+5. **落地要树静默**：宿主必须**真的退出**（applier 等的是宿主 PID），并且**清单里列出的 `.exe`** 不能在树内还在跑。扫描范围就是这两条 —— 树内**不被 manifest 管理**的 exe（自备工具、临时进程、WebView2 子进程等）**不会**被判为繁忙，它们的影响是"占着文件导致改名失败"，那时返回 `io_error` 而非 `tree_busy`。等不到静默时 applier 返回 `Failed` + `reason=tree_busy`，**一个文件都不动**，下次再试。
 6. **落地失败是安全的**：任何一步出问题都不会推进本地清单，下次运行会自动续做；最坏是「这次没生效」，不会「半个版本」。
 7. **离线也能落地，而且落地阶段根本没有网络这条路**：阶段一把远端清单原文留在缓存里，applier 只读它
    （`ApplierConfig.ManifestFile`，默认 `<cache-dir>/manifest.remote.xml`）。那份文件不在 ⇒ 拒绝落地
@@ -538,17 +538,17 @@ $env:UPDATER_E2E_TREES  = "<解包目录的父目录>"
 $env:UPDATER_TEST_TMP   = "<空间充足的临时盘>"
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release RealVersions
 
-# 五版链模拟（22 个场景，真 HTTP + 真 hdiffz）：需要**该线根目录**里已有 server-summary.json
-# （由 _sim\deploy.ps1 -Line coronelauncher|livecontent 产出）。**一条线一次**，两条线各跑一遍才算覆盖：
-#   _sim（CoronaLauncher）与 _sim-lc（LiveContent）
-$env:UPDATER_SIM_OUT = "<线根目录：_sim 或 _sim-lc>"
+# 五版链模拟（22 个场景，真 HTTP + 真 hdiffz）：`UPDATER_SIM_OUT` 指向**线根目录**
+# （布局见 Tests/README：versions/ + manifests/ + server/ + server-summary.json）。
+# **一条线一次**，两条线各跑一遍才算覆盖。
+$env:UPDATER_SIM_OUT = "<线根目录>"
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release
 ```
 
 - 全套（不带上面两个重活）：**185 条 / 约 100 秒**（2026-10-20 实测；AOT 之后测试会真的启动/复制随包的原生 applier，比框架依赖产物慢）；带上一条线的矩阵模拟 + 真实树端到端约 **400 秒**。
 - ⚠ **这两个重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（185），只有耗时能看出来。
   跑跨版本回归必须显式设 `UPDATER_SIM_OUT` / `UPDATER_E2E_TREES`，否则会误以为"跑过了"。
-- 矩阵模拟还有一层要记住：它是**按 `UPDATER_SIM_OUT` 指向的那条线**跑的，两条线（`_sim` / `_sim-lc`）各跑一遍才叫覆盖。
+- 矩阵模拟还有一层要记住：它是**按 `UPDATER_SIM_OUT` 指向的那条线**跑的，两条线各跑一遍才叫覆盖（阈值按线自动取）。
 - `UPDATER_ISO_TREES`：GB 级大文件用例（3 个 Windows ISO），与跨版本无关，缺 ISO 时保持跳过。
 
 > 该测试项目自带一个反射跑器（`Tests/Program.cs`）：受限环境里 VSTest 的 testhost 会因

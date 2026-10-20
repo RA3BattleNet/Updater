@@ -22,12 +22,13 @@ dotnet run -c Release StagedApplierTests.Apply_LandsTheStaged # 精确到方法
   - 真实历史版本端到端：`UPDATER_E2E_TREES=<解包目录的父目录>` —— 该目录下要有
     `CoronaLauncher_Setup_3.12.9269.19502`（旧）与 `CoronaLauncher_Setup_3.12.9381.2215`（新）；
     实测：清单 8.1 s / 补丁 35.4 s（新建 480、失败 0）/ 更新 6.8 s（patch 481、内容 4.8 MB、逐字节一致）
-  - 版本矩阵模拟（22 个场景 = 5 版本链上的 S01–S22）：`UPDATER_SIM_OUT=<线根目录>`，并需要该目录下已有
-    `server-summary.json`（由 `_sim/deploy.ps1 -Line <线名>` 产出）；结果与日志落在该目录的 `logs/<场景>/`。
-    母板 `test/` 里两条线各 5 个版本（版本号线性增大），**共用同一套场景**（阈值按线名自动取），各跑一遍才算覆盖：
-      - `_sim` ← `-Line coronelauncher`（3700~3900 个文件/版）
-      - `_sim-lc` ← `-Line livecontent`（427~509 个文件/版）。S16/S17/S20 在第二条线上会自跳过 ——
-        它们要 `_sim/link-uuids*.ps1` 产出的 linked 清单，那两个脚本尚未参数化到第二条线
+  - 版本矩阵模拟（22 个场景 = 5 版本链上的 S01–S22）：`UPDATER_SIM_OUT=<线根目录>`。线根目录的布局是固定的：
+    `versions/v1..v5/`（5 棵版本树）、`manifests/v1..v5.xml`（对应清单）、`server/`（发布好的 v5 服务端树：
+    `manifest.xml` + `files/` + `patches/`）、`server-summary.json`（版本名单；模拟器也用它认是哪条线）。
+    结果与日志落在 `<root>/logs/<场景>/`。
+    两条线各准备一份（本仓库验证用的是 `_sim` = CoronaLauncher、`_sim-lc` = LiveContent）：3700~3900 个文件/版
+    与 427~509 个文件/版，**共用同一套场景**，阈值按线自动取，各跑一遍才算覆盖。
+    S16/S17/S20 还要求 `manifests/` 里有手工关联过的 `v5-linked.xml` / `v5-linked-full.xml`，第二条线上会自跳过。
 
 ## 为什么自带一个反射跑器（而不是 xUnit runner）
 

@@ -17,7 +17,7 @@
 | `StagedApplier` + `ApplierConfig` | 落地（阶段二/三）。**零网络** —— `ApplierConfig` 里没有清单地址；`BuildApplyCommand(exe, applierCfg)` 生成"宿主退出后该跑什么"的命令 |
 | `StagedApplier.FindDefaultApplierExe()` | **applier 用哪个 exe**：库去找**随本库分发**的 `Applier/{RID}/Client.Applier.exe`（引用本库的宿主输出里自动就有它），不必自己拼路径；返回 `null` 表示这台机器上找不到 |
 | `ApplierConfig.FromArgs(args, UnknownArgPolicy)` | 解析 applier 的命令行 —— **库内唯一一份实现**（生成端是 `BuildApplyCommand`，两端同源才不会漂移）。`Ignore` = 给机器用（不认识的参数忽略，向前兼容旧 exe）；`Strict` = 给人用（白名单之外一律拒）。自己写壳时用它，别各写一份 |
-| `UpdateProgress` | 进度与状态的**事实字段**：`Stage`（阶段标识 `UpdateStage.{Check,Move,Patch,Download,Wait,Apply,Done}`）+ `Current`/`Total` + `FileName` + `Action`（`skip`/`move`/`patch`/`full`，**与 `Stage` 分开**）+ `WaitElapsed`/`WaitTimeout`（仅 `wait`）。字段表见 [`../USAGE.md`](../USAGE.md) §2.2 |
+| `UpdateProgress` | 进度与状态的**事实字段**：`Stage`（阶段标识 `UpdateStage.{Check,Move,Patch,Download,Remove,Wait,Apply,Done}`）+ `Current`/`Total` + `FileName` + `Action`（`skip`/`move`/`patch`/`full`，**与 `Stage` 分开**）+ `WaitElapsed`/`WaitTimeout`（仅 `wait`）。字段表见 [`../USAGE.md`](../USAGE.md) §2.2 |
 
 ## 最小示例
 

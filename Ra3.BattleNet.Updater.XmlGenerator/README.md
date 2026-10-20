@@ -136,7 +136,7 @@ v5:  dotnet\shared\Microsoft.NETCore.App\10.0.5\System.Private.CoreLib.dll   14.
 ## 相关
 
 - 协议与清单格式：`../USAGE.md` §4（文件身份 = UUID、清单即版本身份、生成期自检）
-- 实测数据与场景矩阵：`增量更新器/_sim/analysis.md`（S16 / S17 / S20 三个场景）
+- 实测数据与跨版本场景：`../Ra3.BattleNet.Updater.Tests/README.md` 的版本矩阵模拟（S16 / S17 / S20）
 - 客户端侧为什么"配错也没事"：补丁打完会校验目标 MD5，对不上就回落完整下载（见 `../USAGE.md` §2.3）
 ---
 

@@ -58,8 +58,8 @@ dotnet run --project Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑�
 # 两个"重活"默认跳过、**未设环境变量时静默跳过但仍计 PASS**（计数不变、只有耗时能看出来）：
 $env:UPDATER_SIM_OUT   = '<线根目录>'              # 五版链模拟（22 个场景，约 +4 分钟；**一条线一次**）
 $env:UPDATER_E2E_TREES = '<解包目录的父目录>'      # 真实历史版本端到端（需两个指定版本目录）
-# 矩阵模拟两条线共用同一套 22 个场景：先 _sim\deploy.ps1 -Line coronelauncher / livecontent 各部署一份，
-# 再把 UPDATER_SIM_OUT 分别指向 _sim 与 _sim-lc 各跑一遍。
+# 线根目录要按固定布局准备（versions/ + manifests/ + server/ + server-summary.json，见 Tests/README）；
+# 两条线各准备一份、各跑一遍。
 ```
 
 完整的两版生成 → 发布 → 客户端更新示例见 [`USAGE.md`](USAGE.md) §5。
@@ -72,8 +72,8 @@ $env:UPDATER_E2E_TREES = '<解包目录的父目录>'      # 真实历史版本�
 - **删除是常规行为（没有开关）**：上游清单里拿掉的文件会被删掉 —— 只删"**本地清单登记过、这一版却
   从远端清单消失**"的受管文件（客户端自己生成的日志/设置/缓存从来不在清单里，所以永远不在删除视野），
   实现是**改名**进 `<root>/UpdaterStage/old/`（可回退一代，下次更新开始时清理）。细节见 [`USAGE.md`](USAGE.md) §2.7。
-- **未验证 / 明确不做**：真宿主集成未验证 · 非 Windows 未验证 · 库不提权（宿主不提权时要求安装根可写）·
-  没有 CI（人工跑全套）。
+- **未验证 / 明确不做**：非 Windows 未验证 · 库不提权（宿主不提权时要求安装根可写）· 没有 CI（人工跑全套）。
+  真实宿主（Desktop）已接入，但**那条链路的回归不在本仓库** —— 本仓库只保证库与壳。
   细节与取舍见 [`USAGE.md`](USAGE.md) §0.2。
 - **最容易踩的三个坑**（全部条目在 [`USAGE.md`](USAGE.md) §2.8）：
   1. 替换宿主自己的文件 → 必须 `ApplyMode.Staged`，并在**宿主退出之前**把 applier 挂起来；
