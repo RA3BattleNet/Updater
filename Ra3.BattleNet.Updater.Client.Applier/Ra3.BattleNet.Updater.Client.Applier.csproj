@@ -3,6 +3,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Native AOT / 裁剪：让分析器在本仓库就把反射式 JSON、动态代码这类问题拦下来（要求零告警） -->
+    <IsAotCompatible>true</IsAotCompatible>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Ra3.BattleNet.Updater.Applier</RootNamespace>

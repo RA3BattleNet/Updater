@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Ra3.BattleNet.Updater.Client;
 
@@ -54,11 +53,6 @@ public static class StageLayout
     public const string OldDirName = "old";
     public const string PlanFileName = "plan.json";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
-    };
 
     public static string Root(string installRoot) => Path.Combine(installRoot, DirName);
     public static string NewRoot(string installRoot) => Path.Combine(Root(installRoot), NewDirName);
@@ -87,7 +81,7 @@ public static class StageLayout
     {
         var path = PlanPath(installRoot);
         var tmp = path + ".tmp";
-        Fs.WriteAllText(tmp, JsonSerializer.Serialize(plan, JsonOptions));
+        Fs.WriteAllText(tmp, JsonSerializer.Serialize(plan, StagedPlanJsonContext.Default.StagedPlan));
         Fs.Place(tmp, path);
     }
 
@@ -98,7 +92,7 @@ public static class StageLayout
         {
             var path = PlanPath(installRoot);
             if (!Fs.Exists(path)) return null;
-            var plan = JsonSerializer.Deserialize<StagedPlan>(Fs.ReadAllText(path), JsonOptions);
+            var plan = JsonSerializer.Deserialize(Fs.ReadAllText(path), StagedPlanJsonContext.Default.StagedPlan);
             return plan is { Actions: not null } ? plan : null;
         }
         catch

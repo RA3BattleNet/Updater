@@ -63,28 +63,14 @@ public sealed record UpdateResult(
     /// 独立进程壳（宿主不是 C#）与 CI 都读它；<see cref="Applied"/> /
     /// <see cref="PendingRestart"/> 必须在里面，否则壳只能靠退出码猜。
     /// </summary>
-    public string ToJson() => JsonSerializer.Serialize(new
-    {
-        Outcome = Outcome.ToString(),
-        Reason,
-        Detail,
-        HttpVersion,
-        Applied,
-        PendingRestart,
-        Total,
-        Skipped,
-        Moved,
-        Patched,
-        Full,
-        FailedCount,
-        BytesDownloaded,
-        PayloadBytes,
-        WireBytes,
-        WireSentBytes,
-        WireReceivedBytes,
-        Ms = (long)Elapsed.TotalMilliseconds,
-        Deleted,
-    });
+    /// <summary>一行 JSON（紧凑）。走 source-generated 上下文 —— AOT/裁剪下反射式 JSON 不可用。</summary>
+    public string ToJson() => JsonSerializer.Serialize(
+        new UpdateResultJson(
+            Outcome.ToString(), Reason, Detail, HttpVersion, Applied, PendingRestart,
+            Total, Skipped, Moved, Patched, Full, FailedCount,
+            BytesDownloaded, PayloadBytes, WireBytes, WireSentBytes, WireReceivedBytes,
+            (long)Elapsed.TotalMilliseconds, Deleted),
+        UpdateResultJsonContext.Default.UpdateResultJson);
 
     public override string ToString() =>
         $"{Outcome} reason={Reason} total={Total} skip={Skipped} move={Moved} patch={Patched} " +
