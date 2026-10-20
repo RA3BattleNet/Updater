@@ -13,7 +13,7 @@ namespace Ra3.BattleNet.Updater.Tests;
 /// </summary>
 public class ApplierPackagingTests
 {
-    private sealed record Package(string SourcesHash, string[] Rids, int Sources);
+    private sealed record Package(string SourcesHash, string[] Rids, int Sources, string Mode);
 
     /// <summary>参与构建 applier 的三份源码（闭包：它引用 Client，Client 引用 Share）。</summary>
     private static readonly string[] FingerprintDirs =
@@ -76,7 +76,8 @@ public class ApplierPackagingTests
         var root = doc.RootElement;
         return new Package(root.GetProperty("SourcesHash").GetString()!,
             root.GetProperty("Rids").EnumerateArray().Select(x => x.GetString()!).ToArray(),
-            root.GetProperty("Sources").GetInt32());
+            root.GetProperty("Sources").GetInt32(),
+            root.TryGetProperty("Mode", out var mode) ? mode.GetString() ?? "" : "");
     }
 
     /// <summary>
@@ -99,6 +100,21 @@ public class ApplierPackagingTests
             Assert.True(File.Exists(ApplierPath(repoRoot, rid)),
                 $"承载目录里没有 applier 产物：{ApplierPath(repoRoot, rid)}");
     }
+
+    /// <summary>
+    /// **策略**：签入的 applier 必须是 **Native AOT** 产物。
+    ///
+    /// 宿主端的要求是"目标机上没有 .NET 也能跑"：宿主可以 self-contained，但 **applier 是独立进程**
+    /// （它要等宿主退出才动手，继承不到宿主的自包含运行时）。框架依赖产物在零 runtime 的机器上
+    /// 直接起不来 —— 而且只有用户机器上才发现。所以产物形态本身就是一条要被钉住的策略，
+    /// 不能只比"源指纹对得上"。
+    ///
+    /// 本机没有 C++ 工具链时可以用 `-Fdd` 刷一份调试用产物，**但签入仓库的必须是 AOT** ——
+    /// 用 `-Fdd` 刷过之后这条会红，这是故意的。
+    /// </summary>
+    [Fact]
+    public void CheckedInApplier_IsNativeAot() =>
+        Assert.Equal("aot", ReadPackage(RepoRoot()).Mode);
 
     /// <summary>
     /// **策略测试**：随包 applier 必须覆盖 `HdiffTool.ShippedRids` 里的每一个平台。

@@ -52,7 +52,7 @@ dotnet build Ra3.BattleNet.sln -c Release
 
 # 测试临时目录：**必须是 NTFS**（落地语义依赖共享模式 / 只读属性 / 长路径）
 $env:UPDATER_TEST_TMP = 'H:\TEST\upd-tests'
-dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套（约 40 秒 / 171 条）
+dotnet run --project Ra3.BattleNet.Updater.Tests -c Release            # 全套（约 100 秒 / 185 条，不含两个重活）
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release Staged     # 只跑名字含 Staged 的
 
 # 两个"重活"默认跳过、**未设环境变量时静默跳过但仍计 PASS**（计数不变、只有耗时能看出来）：
@@ -67,7 +67,8 @@ $env:UPDATER_E2E_TREES = '<解包目录的父目录>'      # 真实历史版本�
 ## 当前状态（**接入前扫一眼**）
 
 - **已验证**：协议与清单、增量 / 补丁 / 纯改名 / **删除** / 回落的正确性、中断续做、
-  暂存更新的两个阶段（含 Cloudflare R2 真机端到端）、宿主身份判定、路径信任边界。
+  暂存更新的两个阶段（含 Cloudflare R2 真机端到端）、宿主身份判定、路径信任边界、
+  **AOT / 裁剪兼容**（库与随包 applier 都是，详见 `Client.Applier/README.md`）。
 - **删除是常规行为（没有开关）**：上游清单里拿掉的文件会被删掉 —— 只删"**本地清单登记过、这一版却
   从远端清单消失**"的受管文件（客户端自己生成的日志/设置/缓存从来不在清单里，所以永远不在删除视野），
   实现是**改名**进 `<root>/UpdaterStage/old/`（可回退一代，下次更新开始时清理）。细节见 [`USAGE.md`](USAGE.md) §2.7。

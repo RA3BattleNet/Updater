@@ -14,22 +14,64 @@
 
 ## 它怎么被交付
 
-`applier_bin/{RID}/Client.Applier.exe`（**单文件、框架依赖**）由 `Share` 的 `Content` 声明分发：
-**引用客户端库的宿主，输出目录里自动就有它**，宿主不需要做任何部署。
+`applier_bin/{RID}/Client.Applier.exe` —— **Native AOT 编译的原生可执行文件**（单文件、没有旁路 dll），
+由 `Share` 的 `Content` 声明分发：**引用客户端库的宿主，输出目录里自动就有它**，宿主不需要做任何部署。
 
+- **目标机不需要 .NET 运行时**。宿主自己做 self-contained 也**不够** —— applier 是**独立进程**
+  （它要等宿主退出才动手），继承不到宿主的自包含运行时，所以它本身必须是原生产物。
+- 体积：`win-x64` 约 6.5 MB、`win-x86` 约 5.6 MB、`linux-x64` 约 7.5 MB（合计约 19 MB，随宿主产出走）。
 - 宿主用 `StagedApplier.FindDefaultApplierExe()` 让库自己去找（别各自拼路径）；
 - 它是清单里的**受管文件**，会随更新一起被替换（**旧 applier 落新 applier**）；
-- 随包**覆盖 `HdiffTool.ShippedRids` 的每一个平台**（`win-x64` / `win-x86` / `linux-x64`，共约 0.8 MB）。
+- 随包**覆盖 `HdiffTool.ShippedRids` 的每一个平台**（`win-x64` / `win-x86` / `linux-x64`）。
   漏掉一个平台的后果是：那类宿主上 `FindDefaultApplierExe()` 只返回 `null`（**自更新直接不可用**），
   而且只有运行时才发现 —— 所以有 `ApplierPackagingTests.ApplierCoversEveryShippedRid` 这条**策略测试**钉着；
   若某平台确实决定暂不带，必须同时改那条测试并写明原因。
 - ⚠ 它是**签入仓库的构建产物**：改了 `Client.Applier` / `Client` / `Share` 的源码之后必须跑
   `refresh-applier.ps1`（仓库根）。忘了刷新由守卫测试 `ApplierPackagingTests.CheckedInApplier_MatchesCurrentSources`
   抓成红灯 —— 否则会出现"代码里有修复、随包发的是旧 exe"，测试还全绿。
-  - `pwsh -File refresh-applier.ps1` → 按 `HdiffTool.ShippedRids` 全刷；
-    `-Rids win-x64,win-x86` 只刷指定的那几个（会让上面的策略测试变红，属预期）。
-- **构建期的记录不随包**：源码指纹 + RID 列表在 `Ra3.BattleNet.Updater.Share/applier_build.json`。
-  `applier_bin/` 整目录随宿主产出走，所以那里**只放产物本身**（放了记录就等于把开发机路径带进用户安装树）。
+  - `pwsh -File refresh-applier.ps1` → 按 `HdiffTool.ShippedRids` **全刷（AOT）**；
+  - `-Rids win-x64` 只刷一个（策略测试会红，属预期）；`-NoLinux` 跳过 `linux-*`；
+  - `-Fdd` 出**框架依赖单文件**：只给没装 C++ 工具链的机器临时调试用。签入仓库的必须是 AOT ——
+    策略测试 `ApplierPackagingTests.CheckedInApplier_IsNativeAot` 会拦住（读记录里的 `Mode`）。
+- **构建期的记录不随包**：`SourcesHash` / `Mode` / `Rids` / 每个 RID 的字节数都在
+  `Ra3.BattleNet.Updater.Share/applier_build.json`。`applier_bin/` 整目录随宿主产出走，
+  所以那里**只放产物本身**（放了记录就等于把开发机路径带进用户安装树）。
+
+## 为什么是 Native AOT / 怎么构建
+
+| | 框架依赖单文件 | **Native AOT（现在）** |
+|---|---|---|
+| 体积 / RID | 约 0.35 MB | 约 5.6–7.5 MB |
+| 目标机需要 .NET | **要** | **不要** |
+| 启动 | JIT | 原生代码，无 JIT |
+| 构建工具链 | 无 | Windows 需 MSVC；Linux 需 clang |
+
+```powershell
+# Windows（本机出）
+dotnet publish Ra3.BattleNet.Updater.Client.Applier -c Release -r win-x64 `
+  --self-contained true -p:PublishAot=true
+# Linux AOT **不能跨 OS 编译**（Cross-OS native compilation is not supported）⇒ 在 Linux / WSL 里执行同一命令；
+# refresh-applier.ps1 默认走 WSL（-WslDistro 指定发行版）
+```
+
+两个构建期的坑（脚本里已经处理）：
+
+- Debian 上 `/usr/bin/llvm-objcopy` 常是指向未安装 `lib/llvm-19/` 的**坏符号链接**，AOT 收尾 strip 会报
+  `llvm-objcopy : error : No such file or directory`（编译其实已完成）。脚本用 `-p:ObjCopyName=objcopy`
+  让 GNU objcopy 干这一步，产物一致（已核对：stripped ELF）。
+- AOT 产物旁边会生成几十 MB 的 `.pdb`/符号文件：**不要签入**（脚本只拷可执行文件本身）。
+
+## AOT 对库的影响（已经处理）
+
+applier 是个独立进程，但**它跑的就是库的代码**（`StagedApplier` + Client + Share）。所以 AOT 之前先要把库
+变成 AOT/裁剪兼容，否则会出现"能编译、运行期静默不工作"：
+
+- 所有 JSON 走 **source generation**（`plan.json` 与结果 JSON 的上下文在 `Client/JsonContexts.cs`）。
+  改之前实测过：AOT 产物对着一个合法 `plan.json` 报"没有可用的待提交计划"（反射式 JSON 在 AOT 下被禁，
+  而 `LoadPlan` 的 catch-all 把它吞成"没有计划"）——**落地静默不生效**。
+- `Client` / `Share` / `Client.Applier` 都开了 `<IsAotCompatible>true</IsAotCompatible>` ⇒ 分析器零告警，
+  以后再塞反射式 JSON 会被拦成构建告警。
+- 对**宿主**同样有效的结论：宿主自己走 `PublishAot`（或 `PublishTrimmed`）时，库不会再成为障碍。
 
 ## 宿主怎么接（三步）
 

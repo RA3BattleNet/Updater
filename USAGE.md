@@ -333,6 +333,10 @@ if (r.PendingRestart)
 **applier 用哪个可执行文件**：`StagedApplier.FindDefaultApplierExe()` —— 库会去找**随客户端库分发**的
 `applier_bin/{RID}/Client.Applier.exe`（引用库就自动带上，宿主不需要做任何部署；顺序照 `HdiffTool.Find`，
 找不到返回 `null`，此时该按"不能自更新"处理）。它是清单里的**受管文件**，会随更新一起被替换。
+
+> 那个 exe 是 **Native AOT 编译的原生产物：目标机不需要 .NET 运行时**（宿主 self-contained 不会连带解决
+> 这个问题 —— applier 是独立进程）。宿主自己无论 self-contained 还是 AOT 编译都能正常使用本库
+> （库已做 AOT/裁剪兼容，`IsAotCompatible` 零告警）；细节见 [`Client.Applier/README.md`](Ra3.BattleNet.Updater.Client.Applier/README.md)。
 也可以用宿主**自己的 exe**（它内部调 `StagedApplier`），但要清楚代价：那样会把宿主整套 UI 依赖带进
 落地进程，而落地正在改名树里的文件。
 
@@ -541,8 +545,8 @@ $env:UPDATER_SIM_OUT = "<线根目录：_sim 或 _sim-lc>"
 dotnet run --project Ra3.BattleNet.Updater.Tests -c Release
 ```
 
-- 全套（不带上面两个重活）：**171 条 / 约 40 秒**（2026-10-01 实测）；带上一条线的矩阵模拟 + 真实树端到端约 **299 秒**。
-- ⚠ **这两个重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（171），只有耗时能看出来。
+- 全套（不带上面两个重活）：**185 条 / 约 100 秒**（2026-10-20 实测；AOT 之后测试会真的启动/复制随包的原生 applier，比框架依赖产物慢）；带上一条线的矩阵模拟 + 真实树端到端约 **400 秒**。
+- ⚠ **这两个重活未设环境变量时是"静默跳过、仍计 PASS"**：计数一模一样（185），只有耗时能看出来。
   跑跨版本回归必须显式设 `UPDATER_SIM_OUT` / `UPDATER_E2E_TREES`，否则会误以为"跑过了"。
 - 矩阵模拟还有一层要记住：它是**按 `UPDATER_SIM_OUT` 指向的那条线**跑的，两条线（`_sim` / `_sim-lc`）各跑一遍才叫覆盖。
 - `UPDATER_ISO_TREES`：GB 级大文件用例（3 个 Windows ISO），与跨版本无关，缺 ISO 时保持跳过。
