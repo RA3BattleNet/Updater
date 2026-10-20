@@ -14,7 +14,7 @@
 
 ## 它怎么被交付
 
-`applier_bin/{RID}/Client.Applier.exe` —— **Native AOT 编译的原生可执行文件**（单文件、没有旁路 dll），
+`Applier/{RID}/Client.Applier.exe` —— **Native AOT 编译的原生可执行文件**（单文件、没有旁路 dll），
 由 `Share` 的 `Content` 声明分发：**引用客户端库的宿主，输出目录里自动就有它**，宿主不需要做任何部署。
 
 - **目标机不需要 .NET 运行时**。宿主自己做 self-contained 也**不够** —— applier 是**独立进程**
@@ -34,7 +34,7 @@
   - `-Fdd` 出**框架依赖单文件**：只给没装 C++ 工具链的机器临时调试用。签入仓库的必须是 AOT ——
     策略测试 `ApplierPackagingTests.CheckedInApplier_IsNativeAot` 会拦住（读记录里的 `Mode`）。
 - **构建期的记录不随包**：`SourcesHash` / `Mode` / `Rids` / 每个 RID 的字节数都在
-  `Ra3.BattleNet.Updater.Share/applier_build.json`。`applier_bin/` 整目录随宿主产出走，
+  `Ra3.BattleNet.Updater.Share/applier_build.json`。`Applier/` 整目录随宿主产出走，
   所以那里**只放产物本身**（放了记录就等于把开发机路径带进用户安装树）。
 
 ## 为什么是 Native AOT / 怎么构建

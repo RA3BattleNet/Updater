@@ -31,12 +31,12 @@ m.SaveToXml("manifest.xml");
 
 ## 外部工具的定位顺序（改部署方式时看这里）
 
-`工具目录` → `工具目录/<rid>` → `程序目录` → `程序目录/tools[/<rid>]` → `程序目录/hdiffpatch_bin/<rid>` → **PATH（最后兜底）**。
+`工具目录` → `工具目录/<rid>` → `程序目录` → `程序目录/tools[/<rid>]` → `程序目录/HDiffPatch/<rid>` → **PATH（最后兜底）**。
 
 - 随包只覆盖 `HdiffTool.ShippedRids`：`win-x64` / `win-x86`（v4.8.0，官方无 windows32 资产）/ `linux-x64`。
 - **两份清单必须一致**：`HdiffTool.ShippedRids` ↔ `Ra3.BattleNet.Updater.Share.csproj` 里的 `Content Include`。
 - 找不到工具时报错要能区分"这个平台没打包"与"路径配错"，**不得静默继续**；客户端会因此回落完整下载（安全），发布侧直接失败（正确）。
-- 随包二进制是 MIT，**必须附带上游许可声明**：`hdiffpatch_bin/LICENSE-HDiffPatch.txt`（见 [`../THIRD-PARTY.md`](../THIRD-PARTY.md)）。
+- 随包二进制是 MIT，**必须附带上游许可声明**：`HDiffPatch/LICENSE-HDiffPatch.txt`（见 [`../THIRD-PARTY.md`](../THIRD-PARTY.md)）。
 
 ## 注意
 

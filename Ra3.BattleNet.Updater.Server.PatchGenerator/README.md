@@ -108,8 +108,8 @@ PatchGenerator --manifest <本版xml> --manifest-root <本版目录> --output <�
 - 生成后必须**校验补丁真的能把旧文件还原成新文件**（默认开启，`--no-verify` 才跳过）。
 - 外部工具随包提供 **win-x64 / win-x86 / linux-x64**（`HdiffTool.ShippedRids`）：x64 是主场，`linux-x64`
   给 Linux 发布机，`win-x86` 给 32 位宿主（官方 v5.1.3 没有 windows32 资产，随包的是 **v4.8.0**）。
-  其他平台请自行放入 `hdiffpatch_bin/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
-- 【必须】**随包二进制必须带上游许可声明**：`hdiffpatch_bin/LICENSE-HDiffPatch.txt`（MIT，含 HDiffPatch
+  其他平台请自行放入 `HDiffPatch/<rid>/`，找不到时工具会明确报错（客户端会回落完整下载，不会静默出错）。
+- 【必须】**随包二进制必须带上游许可声明**：`HDiffPatch/LICENSE-HDiffPatch.txt`（MIT，含 HDiffPatch
   与它内嵌的 libdivsufsort）。MIT **不要求通知作者、也不要求开源本项目**，唯一要求是保留版权与许可全文 ——
   所以这个文件不能删，`Share.csproj` 也把它设成随产物复制（见根 `THIRD-PARTY.md`）。
 

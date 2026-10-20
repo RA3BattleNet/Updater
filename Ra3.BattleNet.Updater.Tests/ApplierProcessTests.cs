@@ -19,7 +19,7 @@ public class ApplierProcessTests
     private sealed record Env(string Client, string Server, string V1Dir, string V2Dir,
         string M1, string M2, TestHttpServer Http);
 
-    private static string ApplierRel => $"applier_bin/{HdiffTool.Rid}/"
+    private static string ApplierRel => $"Applier/{HdiffTool.Rid}/"
         + (OperatingSystem.IsWindows() ? "Client.Applier.exe" : "Client.Applier");
 
     private static Env Prepare(TempDir tmp, Action<string, string>? decorate = null)

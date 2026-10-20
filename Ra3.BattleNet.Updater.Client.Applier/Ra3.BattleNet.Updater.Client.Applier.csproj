@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Ra3.BattleNet.Updater.Applier</RootNamespace>
-    <!-- 产物名与承载目录里的名字一致：applier_bin/{RID}/Client.Applier.exe -->
+    <!-- 产物名与承载目录里的名字一致：Applier/{RID}/Client.Applier.exe -->
     <AssemblyName>Client.Applier</AssemblyName>
   </PropertyGroup>
 

@@ -1,5 +1,5 @@
 {
-  "SourcesHash": "53a5e8d44d675a807e847070e259e722",
+  "SourcesHash": "d378c9b165e94f6a76e082184603d428",
   "Mode": "aot",
   "Rids": [
     "win-x64",
@@ -7,13 +7,13 @@
     "linux-x64"
   ],
   "Exes": {
-    "win-x64": {
-      "Name": "Client.Applier.exe",
-      "Bytes": 6836224
-    },
     "linux-x64": {
       "Name": "Client.Applier",
       "Bytes": 7821304
+    },
+    "win-x64": {
+      "Name": "Client.Applier.exe",
+      "Bytes": 6836224
     },
     "win-x86": {
       "Name": "Client.Applier.exe",
@@ -22,5 +22,5 @@
   },
   "Sources": 24,
   "PublishCommand": "dotnet publish Ra3.BattleNet.Updater.Client.Applier -c Release -r {rid} --self-contained true -p:PublishAot=true（linux-* 在 Linux/WSL 上执行同一命令：Windows 不能跨 OS AOT）",
-  "UtcTime": "2026-10-20T15:08:06.8007451Z"
+  "UtcTime": "2026-10-20T15:29:27.1124821Z"
 }

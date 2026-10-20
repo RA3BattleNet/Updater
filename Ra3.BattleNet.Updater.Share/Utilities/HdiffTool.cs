@@ -23,7 +23,7 @@ public static class HdiffTool
     /// v5.1.3 x64 生成的 <c>-c-lzma</c> 补丁**双向兼容**：x86 hpatchz 能正确应用 x64 hdiffz 的 lzma 补丁，
     /// x64 hpatchz 也能应用 x86 hdiffz 产出的补丁（含真实夹具的二进制内容对，退出码 0、哈希一致）。</item>
     /// </list>
-    /// 其他平台（arm/arm64/riscv/loongarch/macos/其它 32 位）请自行放入 hdiffpatch_bin/&lt;rid&gt;/。
+    /// 其他平台（arm/arm64/riscv/loongarch/macos/其它 32 位）请自行放入 HDiffPatch/&lt;rid&gt;/。
     /// </summary>
     public static readonly string[] ShippedRids = ["win-x64", "win-x86", "linux-x64"];
 
@@ -47,7 +47,7 @@ public static class HdiffTool
     /// </summary>
     public static string? FindPatchTool(string toolsDir) => Find(toolsDir, "hpatchz");
 
-    /// <summary>按 工具目录 → 工具目录/RID → 程序目录 → 程序目录/hdiffpatch_bin/RID → PATH 的顺序查找。</summary>
+    /// <summary>按 工具目录 → 工具目录/RID → 程序目录 → 程序目录/HDiffPatch/RID → PATH 的顺序查找。</summary>
     public static string? Find(string toolsDir, string toolName) => Find(toolsDir, toolName, Rid);
 
     /// <summary>同上，但显式指定 RID（供测试与"按别的平台布局部署"的场景用）。</summary>
@@ -61,7 +61,7 @@ public static class HdiffTool
             Path.Combine(AppContext.BaseDirectory, exe),
             Path.Combine(AppContext.BaseDirectory, "tools", exe),
             Path.Combine(AppContext.BaseDirectory, "tools", rid, exe),
-            Path.Combine(AppContext.BaseDirectory, "hdiffpatch_bin", rid, exe),
+            Path.Combine(AppContext.BaseDirectory, "HDiffPatch", rid, exe),
         };
 
         foreach (var c in candidates)
@@ -155,7 +155,7 @@ public static class HdiffTool
             return (false,
                 $"找不到外部工具 {toolName}：当前 RID = {Rid}，本包随发的平台只有 " +
                 $"{string.Join(" / ", ShippedRids)}。工具目录 = {toolsDir}。" +
-                "请从 HDiffPatch 官方包把对应平台的二进制放进 hdiffpatch_bin/<rid>/；" +
+                "请从 HDiffPatch 官方包把对应平台的二进制放进 HDiffPatch/<rid>/；" +
                 (toolName == "hpatchz"
                     ? "注意：缺 hpatchz 时**计划阶段**就会把补丁降级为完整下载（reason=patch_tool_missing），不会再浪费补丁流量。"
                     : "缺 hdiffz 时补丁生成会逐个失败并如实报错。"));

@@ -20,16 +20,16 @@
     但真正该对齐的是这里与 `HdiffTool.ShippedRids` 两份清单。
   -->
   <ItemGroup>
-    <Content Include="hdiffpatch_bin\win-x64\**" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="hdiffpatch_bin\win-x86\**" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="hdiffpatch_bin\linux-x64\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="HDiffPatch\win-x64\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="HDiffPatch\win-x86\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="HDiffPatch\linux-x64\**" CopyToOutputDirectory="PreserveNewest" />
     <!-- MIT 要求保留版权与许可声明：这个文件必须跟二进制一起进产物 -->
-    <Content Include="hdiffpatch_bin\LICENSE-HDiffPatch.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="HDiffPatch\LICENSE-HDiffPatch.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--
     applier 的**专用入口**（单文件、只做落地）：引用本库的宿主因此自动带上它，不需要宿主做任何事
-    （与上面 hdiffpatch_bin 同一套机制、同一个目录层级，AGENT.md §12.5）。
+    （与上面 HDiffPatch 同一套机制、同一个目录层级，AGENT.md §12.5）。
 
     ⚠ 它是**签入仓库的构建产物**：改了 Client.Applier / Client / Share 的源码之后必须跑
       `refresh-applier.ps1` 刷新，否则随包发出去的是旧 exe。守卫测试
@@ -37,7 +37,7 @@
   -->
   <ItemGroup>
     <!-- 只带 {RID}/ 子目录：那个目录里只该有 applier 的产物（构建期的记录放在 Share/applier_build.json，不随包） -->
-    <Content Include="applier_bin\*\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Applier\*\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

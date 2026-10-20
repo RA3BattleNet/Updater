@@ -1,6 +1,6 @@
 # 刷新 applier 的**签入产物**（AGENT.md §12.5）
 #
-# 为什么需要它：`applier_bin/{RID}/Client.Applier.exe` 是**签入仓库的构建产物**（和 hdiffpatch_bin 里的
+# 为什么需要它：`Applier/{RID}/Client.Applier.exe` 是**签入仓库的构建产物**（和 HDiffPatch 里的
 # 二进制同类），不是编译 Client/Share 时产生的。改了 applier 或它依赖的源码之后必须跑一次这个脚本，
 # 否则随包发出去的是旧 exe —— 而测试跑的是项目编译出来的那个，全绿也发现不了。
 # 守卫测试 `ApplierPackagingTests` 会把"忘了刷新"变成红灯。
@@ -33,8 +33,8 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $proj = Join-Path $root 'Ra3.BattleNet.Updater.Client.Applier\Ra3.BattleNet.Updater.Client.Applier.csproj'
 $shareDir = Join-Path $root 'Ra3.BattleNet.Updater.Share'
-$binDir = Join-Path $shareDir 'applier_bin'
-# 【必须】记录文件**不放 applier_bin/**：那个目录整目录随宿主产出走（Content），而记录是**构建期**的东西，
+$binDir = Join-Path $shareDir 'Applier'
+# 【必须】记录文件**不放 Applier/**：那个目录整目录随宿主产出走（Content），而记录是**构建期**的东西，
 # 运行时没人读它 —— 放进去等于把一个带开发机绝对路径的文件塞进用户的安装树。
 $recPath = Join-Path $shareDir 'applier_build.json'
 

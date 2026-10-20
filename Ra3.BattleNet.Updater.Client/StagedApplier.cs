@@ -557,12 +557,12 @@ public sealed class StagedApplier
     /// 找一个可用的 applier 可执行文件（AGENT.md §12.5）。
     ///
     /// **布局是库定的，所以由库来解析**：宿主只该写一句 <c>FindDefaultApplierExe()</c>，
-    /// 而不是各自拼一遍"程序目录/applier_bin/&lt;rid&gt;/…" —— 那种拼法迟早会跟布局漂移，
+    /// 而不是各自拼一遍"程序目录/Applier/&lt;rid&gt;/…" —— 那种拼法迟早会跟布局漂移，
     /// 而漂移的后果是"宿主退出之后才发现没人来落地"。
     ///
     /// 查找顺序（与 <c>HdiffTool.Find</c> 的约定一致）：
     /// <c>工具目录</c> → <c>工具目录/{rid}</c> → <c>程序目录</c> → <c>程序目录/tools[/{rid}]</c> →
-    /// <c>程序目录/applier_bin/{rid}</c> → <c>程序目录/applier_bin</c> → PATH。
+    /// <c>程序目录/Applier/{rid}</c> → <c>程序目录/Applier</c> → PATH。
     /// 返回 <c>null</c> 表示"这台机器上找不到 applier"（宿主据此决定：交回整包 / 报错）。
     /// </summary>
     public static string? FindDefaultApplierExe(string? toolsDir = null)
@@ -582,8 +582,8 @@ public sealed class StagedApplier
         dirs.Add(baseDir);
         dirs.Add(Path.Combine(baseDir, "tools"));
         dirs.Add(Path.Combine(baseDir, "tools", rid));
-        dirs.Add(Path.Combine(baseDir, "applier_bin", rid));   // ← 随包携带的位置
-        dirs.Add(Path.Combine(baseDir, "applier_bin"));
+        dirs.Add(Path.Combine(baseDir, "Applier", rid));   // ← 随包携带的位置
+        dirs.Add(Path.Combine(baseDir, "Applier"));
 
         foreach (var dir in dirs)
         {

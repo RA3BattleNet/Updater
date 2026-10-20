@@ -73,7 +73,7 @@
 ### 2.1 怎么引用
 
 - `ProjectReference` 或直接引用 DLL：**`Ra3.BattleNet.Updater.Client`**（TFM `net10.0`）。
-- **外部工具必须随产物部署**：`hdiffpatch_bin/{win-x64,win-x86,linux-x64}/{hdiffz,hpatchz}`（32 位宿主见 §7）。
+- **外部工具必须随产物部署**：`HDiffPatch/{win-x64,win-x86,linux-x64}/{hdiffz,hpatchz}`（32 位宿主见 §7）。
   默认从**程序自身目录**找（`UpdateConfig.ToolsDir` 可改）；`Share` 项目会自动把它们复制到输出目录。
 - 除框架外**没有第三方依赖**（客户端链路只用到 `Share` 的工具封装与模型）。
 
@@ -180,7 +180,7 @@ UpdateResult r = new Updater(cfg).Run(progress);            // 同步入口
 | `BaseUrl` | 空（= 清单所在目录） | **内容**（`files/`、`patches/`）的基准地址；清单与内容**允许不同源**（清单放小主机、内容放 CDN） |
 | `LocalManifestPath` | `{RootPath}/manifest.xml` | 本地清单：**它的字节就是版本身份** |
 | `CacheDir` | `<系统临时目录>/updater-cache/<安装根指纹>` | 下载产物：`.part`（续传）、内容 blob（文件名 = 目标 MD5，平铺在缓存根）、补丁缓存、`manifest.etag` / `manifest.remote.xml`；**可随时清空**（最坏重下）。唯一例外：**在阶段一与 applier 之间**清掉它，落地会以 `manifest_unavailable` 拒绝（暂存内容与计划保留，下一次更新补齐后照常落地） |
-| `ToolsDir` | 程序自身目录 | `hdiffpatch_bin` 所在目录 |
+| `ToolsDir` | 程序自身目录 | `HDiffPatch` 所在目录 |
 | `ExcludedDirs` | 空 | 不受管顶层目录名（大小写不敏感），其下文件永不参与更新 |
 | `FallbackBaseUrls` | 空 | 备用资源根地址；主地址失败时按顺序回退（404 也会继续试下一个源） |
 | `MaxConcurrency` | 4 | 并发**上限**；起始固定 2，全部成功才逐步加，出现失败就回退 |
@@ -331,7 +331,7 @@ if (r.PendingRestart)
 ```
 
 **applier 用哪个可执行文件**：`StagedApplier.FindDefaultApplierExe()` —— 库会去找**随客户端库分发**的
-`applier_bin/{RID}/Client.Applier.exe`（引用库就自动带上，宿主不需要做任何部署；顺序照 `HdiffTool.Find`，
+`Applier/{RID}/Client.Applier.exe`（引用库就自动带上，宿主不需要做任何部署；顺序照 `HdiffTool.Find`，
 找不到返回 `null`，此时该按"不能自更新"处理）。它是清单里的**受管文件**，会随更新一起被替换。
 
 > 那个 exe 是 **Native AOT 编译的原生产物：目标机不需要 .NET 运行时**（宿主 self-contained 不会连带解决
@@ -386,7 +386,7 @@ if (r.PendingRestart)
 2. **退出动作放在主线程的关闭序列里**（更新线程只发信号），不要用 `Environment.Exit` 代替宿主的清理。
 3. **推荐直接强制重启**：暂存好后告诉用户"需要重启完成更新"，不给"稍后"选项 —— 用户确认 → 挂 applier → 退出，`tree_busy` / 白等超时这些问题都不会出现。
 4. **如果一定要给"稍后"**：用户选稍后时立刻 `Kill()` 掉已挂起的 applier（见要点 14），并且**把"挂 applier"推迟到关闭序列的最后一刻**（别在用户确认之前挂）。
-5. **用 `StagedApplier.FindDefaultApplierExe()` 拿 applier 的路径**，不要自己拼 `applier_bin/...` ——
+5. **用 `StagedApplier.FindDefaultApplierExe()` 拿 applier 的路径**，不要自己拼 `Applier/...` ——
    布局由库定，宿主各拼一份迟早会与布局漂移，而漂移的后果是"宿主退出之后才发现没人来落地"。
    拿到的就是**随客户端库分发**的那一个（清单里的受管文件，会随更新一起被替换）。
 
@@ -574,5 +574,5 @@ dotnet build H:\TEST\freshclone\Ra3.BattleNet.sln -c Release
 | `manifest.xml` | **不要缓存**（唯一会变的对象）；条件请求可用，命中 304 = 0 字节 |
 | 压缩 | CF 只按 `Content-Type` 白名单压：`manifest.xml`（`text/xml`）19,507 → **3,264 B**；`files/`、`patches/`（`application/octet-stream`）**不压**——已按"不压"设计，不再为它做特殊处理 |
 | 单文件缓存上限 | CF 的 Free/Pro/Business 为 **512 MB**（Enterprise 5 GB）；超出的对象永远回源 → GB 级文件按"不可缓存"设计 |
-| 外部工具 | `hdiffpatch_bin` **必须带与宿主 RID 匹配的那一份**：`HdiffTool.Rid` = 当前**进程**架构（32 位宿主 → `win-x86`）。随包覆盖 win-x64 / win-x86 / linux-x64 |
+| 外部工具 | `HDiffPatch` **必须带与宿主 RID 匹配的那一份**：`HdiffTool.Rid` = 当前**进程**架构（32 位宿主 → `win-x86`）。随包覆盖 win-x64 / win-x86 / linux-x64 |
 | 缺工具时 | **计划阶段就降级**：`hpatchz` 找不到 → 所有补丁直接计划成完整下载，`reason=patch_tool_missing`，`UpdateResult.Detail` 说明原因。绝不会"先下一份补丁再回落"（那比纯完整下载还费流量） |

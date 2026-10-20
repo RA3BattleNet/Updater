@@ -6,8 +6,8 @@ using Ra3.BattleNet.Updater.Share.Utilities;
 namespace Ra3.BattleNet.Updater.Tests;
 
 /// <summary>
-/// applier 是**签入仓库的构建产物**（`applier_bin/{RID}/Client.Applier.exe`），由库的 `Content` 声明
-/// 随宿主产出走（与 `hdiffpatch_bin` 同一机制）。这里钉住两件事：
+/// applier 是**签入仓库的构建产物**（`Applier/{RID}/Client.Applier.exe`），由库的 `Content` 声明
+/// 随宿主产出走（与 `HDiffPatch` 同一机制）。这里钉住两件事：
 ///   ① 签入的那份与**当前源码**是一对；
 ///   ② 它确实随库的输出走进了引用方的目录，并且库自己能找到它。
 /// </summary>
@@ -34,7 +34,7 @@ public class ApplierPackagingTests
     }
 
     /// <summary>
-    /// 构建期记录。**它不放在 `applier_bin/` 里**：那个目录整目录随宿主产出走（`Content`），
+    /// 构建期记录。**它不放在 `Applier/` 里**：那个目录整目录随宿主产出走（`Content`），
     /// 而记录运行时没人读 —— 放进去等于把一个带开发机路径的文件塞进用户的安装树。
     /// </summary>
     private static string RecordPath(string repoRoot) =>
@@ -141,7 +141,7 @@ public class ApplierPackagingTests
     /// （例如在 Windows 上核对 `linux-x64/Client.Applier`），照当前 OS 拼名字会找错文件。
     /// </summary>
     private static string ApplierPath(string repoRoot, string rid) =>
-        Path.Combine(repoRoot, "Ra3.BattleNet.Updater.Share", "applier_bin", rid,
+        Path.Combine(repoRoot, "Ra3.BattleNet.Updater.Share", "Applier", rid,
             rid.StartsWith("win-", StringComparison.OrdinalIgnoreCase) ? "Client.Applier.exe" : "Client.Applier");
 
     /// <summary>它必须随库的输出进到引用方的目录里 —— 宿主"只引用 client 库"就够，不需要自己做任何部署。</summary>
@@ -151,6 +151,7 @@ public class ApplierPackagingTests
         var found = StagedApplier.FindDefaultApplierExe();
         Assert.False(string.IsNullOrEmpty(found), "在本库的输出目录里找不到 applier（Content 没带上？）");
         Assert.True(File.Exists(found!));
-        Assert.Contains("applier_bin", found!, StringComparison.OrdinalIgnoreCase);
+        // 【必须】路径里必须**带承载目录**（只断言 "Applier" 会被文件名 Client.Applier.exe 蒙混过去）
+        Assert.Contains(Path.Combine("Applier", HdiffTool.Rid), found!);
     }
 }

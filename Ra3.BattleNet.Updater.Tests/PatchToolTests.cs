@@ -59,7 +59,7 @@ public class PatchToolTests
     /// <summary>
     /// **端到端**：工具不可用时，一个补丁请求都不该发出去。
     ///
-    /// 为了在测试进程里造出"工具不可用"，这里把输出目录里的 `hdiffpatch_bin` 整个挪开、并清空 PATH
+    /// 为了在测试进程里造出"工具不可用"，这里把输出目录里的 `HDiffPatch` 整个挪开、并清空 PATH
     /// （`Find` 的最后一道兜底是 PATH，而开发机上 PATH 里可能有别人装的 hpatchz），
     /// 跑完在 finally 里原样还原 —— 下次 `dotnet build` 也会按 Content 规则重新复制一份。
     /// </summary>
@@ -87,7 +87,7 @@ public class PatchToolTests
         File.Copy(m1, Path.Combine(client, "manifest.xml"), overwrite: true);
 
         // 挪开随包工具 + 清空 PATH ⇒ `Find` 必然返回 null
-        var binDir = Path.Combine(AppContext.BaseDirectory, "hdiffpatch_bin");
+        var binDir = Path.Combine(AppContext.BaseDirectory, "HDiffPatch");
         var moved = binDir + ".disabled-for-test";
         var savedPath = Environment.GetEnvironmentVariable("PATH");
         var movedOk = false;
